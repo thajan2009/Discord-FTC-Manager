@@ -195,10 +195,11 @@ async def _flush_loop() -> None:
     while True:
         await asyncio.sleep(FLUSH_INTERVAL)
         try:
-            col = get_collection()
+            # Route through save_guild_doc so the merge runs: website-owned
+            # teams/settings are preserved even if this cache copy is stale.
             for doc in list(_cache.values()):
                 try:
-                    await col.replace_one({"_id": doc["_id"]}, doc, upsert=True)
+                    await save_guild_doc(doc)
                 except Exception as exc:
                     print(f"[mongo] backup flush failed: {exc}")
         except Exception as exc:
