@@ -10,8 +10,8 @@
 
 ## 2. Bot-hosting.net (bot only)
 1. Login → Create Server → Python.
-2. On your PC, zip the CONTENTS of `bot/` so zip root has `main.py`, `requirements.txt`, `cogs/`, `db/`, `utils/`, `data/` (edit `data/ftchelp.py` first to add your FTC help entries).
-   - GOOD zip root: `main.py`, `requirements.txt`
+2. On your PC, zip the CONTENTS of `bot/` so zip root has `main.py`, `audioop.py`, `requirements.txt`, `cogs/`, `db/`, `data/`, `utils/` (edit `data/ftchelp.py` first to add your FTC help entries).
+   - GOOD zip root: `main.py`, `audioop.py`, `requirements.txt`
    - BAD: `bot/main.py` (extra folder — move files out after Unarchive if this happens).
 3. Panel → Files → Upload zip → Unarchive → move to root, delete zip.
 4. Panel → Startup → Entry File = `main.py`. Do NOT run pip in console — `requirements.txt` auto-installs.
@@ -36,3 +36,7 @@
 - Prefix-only (no slash): `!addcmd`, `!delcmd`, `!cmds`, `!ftchelp [page]`, FTC directory triggers (e.g. `!axon`), and all custom `!triggers`.
 - No IDs anywhere: embeds show plain names; removal matches names exactly (case-insensitive).
 - FTC directory lives in `bot/data/ftchelp.py` — one `"trigger": "response"` line per entry, restart bot to apply. Server `!addcmd` overrides it per server.
+
+## 6. Troubleshooting (Bot-hosting.net)
+- `ModuleNotFoundError: No module named 'audioop'` → the host runs Python 3.14+, where that stdlib module was removed but discord.py still imports it. Fixed in-repo: `bot/audioop.py` is a fallback stub (voice is unused) — make sure it is included at the ROOT of your uploaded zip, next to `main.py`, then Restart.
+  If the panel's Startup tab offers a Python version choice, 3.12 or 3.13 also works (with or without the stub).

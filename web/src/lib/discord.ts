@@ -1,10 +1,19 @@
 import './env';
 
+// Normalized site root: no trailing slash, so the callback URL is always
+// exactly <root>/api/auth/callback (Discord rejects even a double slash).
+export function webBase(): string {
+  return (process.env.PUBLIC_WEB_URL ?? '').replace(/\/+$/, '');
+}
+
+export function callbackUrl(): string {
+  return `${webBase()}/api/auth/callback`;
+}
+
 export function loginUrl(): string {
   const id = process.env.DISCORD_CLIENT_ID!;
-  const redirect = `${process.env.PUBLIC_WEB_URL}/api/auth/callback`;
   const params = new URLSearchParams({
-    client_id: id, redirect_uri: redirect, response_type: 'code', scope: 'identify guilds',
+    client_id: id, redirect_uri: callbackUrl(), response_type: 'code', scope: 'identify guilds',
   });
   return `https://discord.com/api/oauth2/authorize?${params}`;
 }
@@ -18,7 +27,7 @@ export async function exchangeCode(code: string) {
       client_secret: process.env.DISCORD_CLIENT_SECRET!,
       grant_type: 'authorization_code',
       code,
-      redirect_uri: `${process.env.PUBLIC_WEB_URL}/api/auth/callback`,
+      redirect_uri: callbackUrl(),
     }),
   });
   if (!res.ok) throw new Error('token exchange failed');
