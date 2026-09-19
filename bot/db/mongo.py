@@ -212,7 +212,7 @@ def start_flush_loop() -> None:
         return
     _flush_started = True
     asyncio.get_running_loop().create_task(_flush_loop())
-    print(f"[mongo] cache on, DB backup flush every {FLUSH_INTERVAL}s")
+    print(f"[mongo] cache on, merge-save v2 active, DB backup flush every {FLUSH_INTERVAL}s")
 
 
 def suggest_team(doc: dict, query: str | None) -> str | None:
