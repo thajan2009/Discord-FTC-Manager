@@ -4,6 +4,13 @@ import { guildExists } from './mongo';
 
 const LOGIN = '/api/auth/login';
 
+// Bot owner: full website access on every server, even without Manage Server.
+const OWNER_ID = '600411237561663498';
+
+export function isOwner(session: any): boolean {
+  return String(session?.id ?? '') === OWNER_ID;
+}
+
 export interface Authed {
   user: any;
   /** Non-null when the token was refreshed: re-save the session cookie. */
@@ -45,7 +52,7 @@ export async function requireManager(guildId: string, request: Request): Promise
   if (!loaded) return { err: loginRedirect() };
   const { guilds, session: s, refreshed } = loaded;
   const g = guilds.find((x: any) => String(x.id) === String(guildId));
-  if (!g || !canManageGuild(g)) {
+  if (!g || (!canManageGuild(g) && !isOwner(session))) {
     return { err: new Response('Forbidden: you must be a server admin.', { status: 403 }) };
   }
   const botIds = await botGuildIds();
@@ -65,7 +72,8 @@ export async function manageableBotGuilds(
   const loaded = await guildsWithRefresh(session);
   if (!loaded) return { err: loginRedirect() };
   const { guilds: all, session: s, refreshed } = loaded;
-  const manageable = all.filter(canManageGuild);
+  // Owner sees every server; everyone else only ones they can manage.
+  const manageable = isOwner(s) ? all : all.filter(canManageGuild);
   const botIds = await botGuildIds();
   let guilds: any[];
   if (botIds) {
