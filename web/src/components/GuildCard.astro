@@ -1,0 +1,22 @@
+---
+interface Props {
+  name: string;
+  guildId: string;
+  icon?: string | null;
+  delay?: number;
+  stats?: string | null;
+}
+const { name, guildId, icon = null, delay = 0, stats = null } = Astro.props;
+const iconUrl = icon ? `https://cdn.discordapp.com/icons/${guildId}/${icon}.png?size=128` : null;
+const letter = (name ?? '?').trim().charAt(0).toUpperCase() || '?';
+---
+<a class="card lift server-card reveal" style={`text-decoration:none;color:inherit;transition-delay:${delay}ms`} href={`/guild/${guildId}`} data-astro-prefetch="hover">
+  <div class="server-icon">
+    {iconUrl ? <img src={iconUrl} alt="" loading="lazy" /> : letter}
+  </div>
+  <div>
+    <h3>{name}</h3>
+    <p>{stats ?? 'Teams · commands · finance · inventory'}</p>
+  </div>
+  <span class="go">→</span>
+</a>

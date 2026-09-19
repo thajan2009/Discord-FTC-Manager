@@ -1,0 +1,261 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import StatCard from '../../components/StatCard.astro';
+import TeamRow from '../../components/TeamRow.astro';
+import CommandRow from '../../components/CommandRow.astro';
+import { requireManager } from '../../lib/guard';
+import { SESSION_NAME, SESSION_MAX_AGE, sessionValue } from '../../lib/session';
+import { getGuild } from '../../lib/mongo';
+
+const { id } = Astro.params;
+const gate = await requireManager(String(id), Astro.request);
+if ('err' in gate) return gate.err;
+const user = gate.ok.user;
+if (gate.ok.refreshed) {
+  Astro.cookies.set(SESSION_NAME, sessionValue(gate.ok.refreshed), {
+    path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: SESSION_MAX_AGE,
+  });
+}
+const doc = await getGuild(String(id));
+const teams = doc.teams ?? [];
+const cmds = doc.commands ?? [];
+const settings = doc.settings ?? { finance_mode: 'everyone', inventory_mode: 'everyone', currency: '£' };
+const currency = String(settings.currency ?? '£').slice(0, 3) || '£';
+
+const errorMessages: Record<string, string> = {
+  'max-teams': 'Team limit reached (3). Delete one to add another.',
+  'name-required': 'A name is required.',
+  'name-taken': 'That team name is already used.',
+  'alias-taken': 'One of those aliases is already used.',
+  'command-required': 'Both a trigger and a response are required.',
+  'trigger-spaces': 'Trigger must be one word (no spaces).',
+  'bad-amount': 'Amount must be a number like 25 or 25.50.',
+  'bad-qty': 'Quantity must be a whole number (0 or more).',
+  missing: 'Something was missing — please try again.',
+};
+const pounds = (p: number) => (Number(p) / 100).toFixed(2);
+const errorSlug = Astro.url.searchParams.get('error');
+const saved = Astro.url.searchParams.get('saved') === '1';
+
+function gbp(pence: number, sym: string = currency): string {
+  const sign = pence < 0 ? '-' : '';
+  const abs = Math.abs(Math.round(pence));
+  const whole = Math.floor(abs / 100);
+  const rest = String(abs % 100).padStart(2, '0');
+  return `${sign}${sym}${whole.toLocaleString('en-GB')}.${rest}`;
+}
+
+let debtTotal = 0, srcTotal = 0, itemKinds = 0, itemQty = 0;
+// Only live teams + server bucket: entries from long-deleted teams stay hidden.
+const validBuckets = new Set(['_server', ...teams.map((t: any) => t.id)]);
+for (const [key, bucket] of Object.entries<any>(doc.finance?.teams ?? {})) {
+  if (!validBuckets.has(key)) continue;
+  for (const d of (bucket.debts ?? [])) debtTotal += Number(d.amount_p ?? 0);
+  for (const s of (bucket.sources ?? [])) srcTotal += Number(s.amount_p ?? 0);
+}
+for (const [key, bucket] of Object.entries<any>(doc.inventory?.teams ?? {})) {
+  if (!validBuckets.has(key)) continue;
+  for (const it of (bucket.items ?? [])) { itemKinds += 1; itemQty += Number(it.qty ?? 0); }
+}
+const net = srcTotal - debtTotal;
+
+function bucketLabel(key: string): string {
+  if (key === '_server') return 'Server';
+  return teams.find((t: any) => t.id === key)?.name ?? 'Removed team';
+}
+
+const finDebts: any[] = [];
+const finSources: any[] = [];
+for (const [key, bucket] of Object.entries<any>(doc.finance?.teams ?? {})) {
+  if (!validBuckets.has(key)) continue;
+  for (const d of (bucket.debts ?? [])) finDebts.push({ bucket: key, name: d.name, amount: Number(d.amount_p ?? 0), by: d.by ?? null });
+  for (const s of (bucket.sources ?? [])) finSources.push({ bucket: key, name: s.name, amount: Number(s.amount_p ?? 0), by: s.by ?? null });
+}
+const invItems: any[] = [];
+for (const [key, bucket] of Object.entries<any>(doc.inventory?.teams ?? {})) {
+  if (!validBuckets.has(key)) continue;
+  for (const it of (bucket.items ?? [])) invItems.push({ bucket: key, name: it.name, qty: Number(it.qty ?? 0), by: it.by ?? null });
+}
+---
+<Layout title="Manage server" user={user}>
+  <a class="back" href="/dashboard">← All servers</a>
+
+  {errorSlug && errorMessages[errorSlug] ? (
+    <div class="notice" style="margin-top:16px;border-color:var(--red)">{errorMessages[errorSlug]}</div>
+  ) : null}
+  {saved ? <div class="notice" style="margin-top:16px">Settings saved.</div> : null}
+
+  <section class="section">
+    <h2>Overview</h2>
+    <p class="desc">Combined across all teams. Details live in Discord via <code class="cmd">!bal</code> and <code class="cmd">!inv</code>.</p>
+    <div class="stats">
+      <StatCard label="Net cashflow" value={gbp(net)} sub={`in ${gbp(srcTotal)} / out ${gbp(debtTotal)}`} />
+      <StatCard label="Inventory" value={String(itemQty)} sub={`${itemKinds} different items`} />
+      <StatCard label="Teams" value={`${teams.length} / 3`} sub={(cmds.length === 1 ? '1 custom command' : `${cmds.length} custom commands`)} />
+    </div>
+  </section>
+
+  <section class="section reveal">
+    <h2>Teams ({teams.length}/3)</h2>
+    <p class="desc">Use the name or any alias in Discord, e.g. <code class="cmd">!bal {teams[0]?.name ?? 'myteam'}</code>.</p>
+    <div class="row-list">
+      {teams.map((t: any) => <TeamRow guildId={String(id)} team={t} />)}
+    </div>
+    {teams.length < 3 ? (
+      <form class="form-card" method="POST" action={`/api/guilds/${id}/teams`}>
+        <div class="form-row">
+          <div class="field"><label>Team name</label><input name="name" placeholder="Robotics Team #1" required /></div>
+          <div class="field"><label>Aliases (comma separated)</label><input name="aliases" placeholder="first, one, 1" /></div>
+          <div><button class="btn btn-small" type="submit">Add team</button></div>
+        </div>
+      </form>
+    ) : (
+      <div class="notice">Team limit reached (3). Delete one to add another.</div>
+    )}
+  </section>
+
+  <section class="section reveal">
+    <h2>Custom commands</h2>
+    <p class="desc">Prefix-only. Type <code class="cmd">!name</code> in Discord to use.</p>
+    <div class="row-list">
+      {cmds.map((c: any) => <CommandRow guildId={String(id)} cmd={c} />)}
+    </div>
+    <form class="form-card" method="POST" action={`/api/guilds/${id}/commands`}>
+      <div class="form-row">
+        <div class="field"><label>Trigger (one word)</label><input name="trigger" placeholder="practice" required /></div>
+        <div class="field"><label>Response</label><input name="response" placeholder="Practice is Tuesdays at 6pm" required /></div>
+        <div><button class="btn btn-small" type="submit">Add</button></div>
+      </div>
+    </form>
+  </section>
+
+  <section class="section reveal">
+    <h2>Finance details</h2>
+    <p class="desc">Every debt and source across teams. Add new ones from Discord with the + Debt / + Source buttons.</p>
+    {(finDebts.length === 0 && finSources.length === 0) ? (
+      <p class="empty">Nothing tracked yet. Type <code class="cmd">!bal</code> in Discord to get started.</p>
+    ) : null}
+    {finDebts.length > 0 ? (
+      <>
+        <h3>Debts</h3>
+        <div class="row-list">
+          {finDebts.map((d: any) => (
+            <div class="row-item">
+              <div class="meta">
+                <div class="title">{d.name} — {gbp(d.amount)}</div>
+                <div class="detail">{bucketLabel(d.bucket)}{d.by ? ` · added by ${d.by}` : ''}</div>
+                <details class="edit">
+                  <summary>Edit name / amount</summary>
+                  <form method="POST" action={`/api/guilds/${id}/finance/edit`}>
+                    <input type="hidden" name="bucket" value={d.bucket} />
+                    <input type="hidden" name="oldname" value={d.name} />
+                    <input name="name" value={d.name} required maxlength="80" aria-label="Name" />
+                    <input name="amount" value={pounds(d.amount)} required inputmode="decimal" aria-label={`Amount (${currency})`} />
+                    <button class="btn btn-small" type="submit">Save</button>
+                  </form>
+                </details>
+              </div>
+              <form method="POST" action={`/api/guilds/${id}/finance/delete`} onsubmit="return confirm('Delete this entry?')">
+                <input type="hidden" name="bucket" value={d.bucket} />
+                <input type="hidden" name="name" value={d.name} />
+                <button class="btn-danger" type="submit">Delete</button>
+              </form>
+            </div>
+          ))}
+        </div>
+      </>
+    ) : null}
+    {finSources.length > 0 ? (
+      <>
+        <h3>Sources / Sponsors</h3>
+        <div class="row-list">
+          {finSources.map((s: any) => (
+            <div class="row-item">
+              <div class="meta">
+                <div class="title">{s.name} — {gbp(s.amount)}</div>
+                <div class="detail">{bucketLabel(s.bucket)}{s.by ? ` · added by ${s.by}` : ''}</div>
+                <details class="edit">
+                  <summary>Edit name / amount</summary>
+                  <form method="POST" action={`/api/guilds/${id}/finance/edit`}>
+                    <input type="hidden" name="bucket" value={s.bucket} />
+                    <input type="hidden" name="oldname" value={s.name} />
+                    <input name="name" value={s.name} required maxlength="80" aria-label="Name" />
+                    <input name="amount" value={pounds(s.amount)} required inputmode="decimal" aria-label={`Amount (${currency})`} />
+                    <button class="btn btn-small" type="submit">Save</button>
+                  </form>
+                </details>
+              </div>
+              <form method="POST" action={`/api/guilds/${id}/finance/delete`} onsubmit="return confirm('Delete this entry?')">
+                <input type="hidden" name="bucket" value={s.bucket} />
+                <input type="hidden" name="name" value={s.name} />
+                <button class="btn-danger" type="submit">Delete</button>
+              </form>
+            </div>
+          ))}
+        </div>
+      </>
+    ) : null}
+  </section>
+
+  <section class="section reveal">
+    <h2>Inventory details</h2>
+    <p class="desc">Every item across teams. Change quantities from Discord with Set Qty.</p>
+    {invItems.length === 0 ? (
+      <p class="empty">Nothing tracked yet. Type <code class="cmd">!inv</code> in Discord to get started.</p>
+    ) : (
+      <div class="row-list">
+        {invItems.map((it: any) => (
+          <div class="row-item">
+            <div class="meta">
+              <div class="title">{it.name} x {it.qty}</div>
+              <div class="detail">{bucketLabel(it.bucket)}{it.by ? ` · added by ${it.by}` : ''}</div>
+              <details class="edit">
+                <summary>Edit name / quantity</summary>
+                <form method="POST" action={`/api/guilds/${id}/inventory/edit`}>
+                  <input type="hidden" name="bucket" value={it.bucket} />
+                  <input type="hidden" name="oldname" value={it.name} />
+                  <input name="name" value={it.name} required maxlength="60" aria-label="Item name" />
+                  <input name="qty" value={it.qty} required inputmode="numeric" aria-label="Quantity" />
+                  <button class="btn btn-small" type="submit">Save</button>
+                </form>
+              </details>
+            </div>
+            <form method="POST" action={`/api/guilds/${id}/inventory/delete`} onsubmit="return confirm('Delete this item?')">
+              <input type="hidden" name="bucket" value={it.bucket} />
+              <input type="hidden" name="name" value={it.name} />
+              <button class="btn-danger" type="submit">Delete</button>
+            </form>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+
+  <section class="section reveal">
+    <h2>Permissions &amp; currency</h2>
+    <p class="desc">Who can add, change or remove finance and inventory entries — plus the currency symbol (£ by default).</p>
+    <form class="form-card" method="POST" action={`/api/guilds/${id}/settings`}>
+      <div class="form-row">
+        <div class="field">
+          <label>Finance</label>
+          <select name="finance_mode">
+            <option value="everyone" selected={settings.finance_mode !== 'admins'}>Everyone</option>
+            <option value="admins" selected={settings.finance_mode === 'admins'}>Admins only</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Inventory</label>
+          <select name="inventory_mode">
+            <option value="everyone" selected={settings.inventory_mode !== 'admins'}>Everyone</option>
+            <option value="admins" selected={settings.inventory_mode === 'admins'}>Admins only</option>
+          </select>
+        </div>
+        <div class="field" style="flex:0 1 140px">
+          <label>Currency symbol</label>
+          <input name="currency" value={currency} required maxlength="3" aria-label="Currency symbol" />
+        </div>
+        <div><button class="btn btn-small" type="submit">Save</button></div>
+      </div>
+    </form>
+  </section>
+</Layout>

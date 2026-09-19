@@ -1,0 +1,92 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { getSessionUser } from '../lib/session';
+
+const user = getSessionUser(Astro.request);
+---
+<Layout title="Home" user={user}>
+  <section class="hero">
+    <img class="hero-logo" src="/logo.png" alt="FTCManager logo" />
+    <br />
+    <span class="pill">Discord finance · inventory · custom commands</span>
+    <h1>Run your server<br />like a <span class="gradient-text">pro team</span></h1>
+    <p>Shared balance tracking, stock counts and custom commands for your Discord community — set up in minutes, managed from a clean dashboard.</p>
+    <div class="hero-cta">
+      {user ? (
+        <a class="btn" href="/dashboard">Open dashboard</a>
+      ) : (
+        <a class="btn" href="/api/auth/login">Login with Discord</a>
+      )}
+      <a class="btn btn-ghost" href="#preview">See it in action</a>
+    </div>
+
+    <div class="discord-mock" id="preview">
+      <div class="msg">
+        <div class="avatar"><img src="/logo.png" alt="FTCManager" /></div>
+        <div>
+          <div><span class="who">FTCManager<span class="tag">BOT</span></span></div>
+          <div class="cmdline">Drive team balance</div>
+          <div class="embed-mock">
+            <div class="etitle">Balance — Drive team</div>
+            <div class="fname">Starting balance</div>
+            <div class="fval">£0.00</div>
+            <div class="fname">Debts — £120.00</div>
+            <div class="fval">Venue hire — £120.00</div>
+            <div class="fname">Sources / Sponsors — £350.00</div>
+            <div class="fval">WilSonic Boom — £350.00</div>
+            <div class="fname">Net cashflow</div>
+            <div class="fval net">£230.00</div>
+          </div>
+          <div class="mock-btns"><span class="b-red">+ Debt</span><span class="b-green">+ Source / Sponsor</span><span class="b-grey">Remove</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2 class="reveal">Everything in one place</h2>
+    <p class="desc reveal">Four tools your server will actually use every week.</p>
+    <div class="grid">
+      <div class="card lift reveal">
+        <div class="icon-badge">£</div>
+        <h3>Finance</h3>
+        <p><code class="cmd">!bal</code> or <code class="cmd">/balance</code> shows debts, sponsors and net cashflow — server-wide or per team. Add entries with buttons; no IDs to remember.</p>
+      </div>
+      <div class="card lift reveal" style="transition-delay:80ms">
+        <div class="icon-badge">▤</div>
+        <h3>Inventory</h3>
+        <p><code class="cmd">!inv</code> or <code class="cmd">/inventory</code> tracks items and quantities per team. Change stock by typing the exact item name.</p>
+      </div>
+      <div class="card lift reveal" style="transition-delay:160ms">
+        <div class="icon-badge">!</div>
+        <h3>Custom commands</h3>
+        <p>Create your own <code class="cmd">!commands</code> per server on top of global responses. Prefix-only, instant, no redeploy.</p>
+      </div>
+      <div class="card lift reveal" style="transition-delay:240ms">
+        <div class="icon-badge">◈</div>
+        <h3>Teams &amp; permissions</h3>
+        <p>Up to 3 teams per server with aliases. Toggle whether everyone or only admins can touch finance and inventory.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2 class="reveal">Live in three steps</h2>
+    <p class="desc reveal">From zero to tracking money tonight.</p>
+    <div class="grid">
+      <div class="card lift reveal"><div class="step-num">STEP 1</div><h3>Add the bot</h3><p>Invite it with the <code class="cmd">bot</code> scope, then log in here with Discord.</p></div>
+      <div class="card lift reveal" style="transition-delay:100ms"><div class="step-num">STEP 2</div><h3>Create teams</h3><p>Open your server and add up to 3 teams with short aliases like <code class="cmd">drive</code>.</p></div>
+      <div class="card lift reveal" style="transition-delay:200ms"><div class="step-num">STEP 3</div><h3>Track from chat</h3><p>Type <code class="cmd">!bal drive</code> or <code class="cmd">/inventory</code> right in Discord. Done.</p></div>
+    </div>
+  </section>
+
+  <section class="cta-band reveal">
+    <h2>Ready when your team is</h2>
+    <p>Free to start. Your balance and stock, one command away.</p>
+    {user ? (
+      <a class="btn" href="/dashboard">Open dashboard</a>
+    ) : (
+      <a class="btn" href="/api/auth/login">Login with Discord</a>
+    )}
+  </section>
+</Layout>

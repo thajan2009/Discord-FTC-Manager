@@ -1,0 +1,17 @@
+---
+interface Props {
+  guildId: string;
+  cmd: { trigger: string; response: string };
+}
+const { guildId, cmd } = Astro.props;
+---
+<div class="row-item">
+  <div class="meta">
+    <div class="title"><code class="cmd">!{cmd.trigger}</code></div>
+    <div class="detail">{cmd.response}</div>
+  </div>
+  <form method="POST" action={`/api/guilds/${guildId}/commands/delete`} onsubmit="return confirm('Delete this command?')">
+    <input type="hidden" name="trigger" value={cmd.trigger} />
+    <button class="btn-danger" type="submit">Delete</button>
+  </form>
+</div>

@@ -1,0 +1,67 @@
+---
+import Layout from '../layouts/Layout.astro';
+import GuildCard from '../components/GuildCard.astro';
+import { manageableBotGuilds } from '../lib/guard';
+import { SESSION_NAME, SESSION_MAX_AGE, sessionValue } from '../lib/session';
+import { getGuild } from '../lib/mongo';
+
+const gate = await manageableBotGuilds(Astro.request);
+if ('err' in gate) return gate.err;
+const { user, guilds, refreshed } = gate.ok;
+if (refreshed) {
+  Astro.cookies.set(SESSION_NAME, sessionValue(refreshed), {
+    path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: SESSION_MAX_AGE,
+  });
+}
+
+function gbp(pence: number): string {
+  const sign = pence < 0 ? '-' : '';
+  const abs = Math.abs(Math.round(pence));
+  return `${sign}£${Math.floor(abs / 100).toLocaleString('en-GB')}.${String(abs % 100).padStart(2, '0')}`;
+}
+
+// Mini-stats per server (small docs; one indexed read each).
+const cards: any[] = [];
+for (const g of guilds) {
+  try {
+    const doc = await getGuild(String(g.id));
+    let debt = 0, src = 0;
+    for (const b of Object.values<any>(doc.finance?.teams ?? {})) {
+      for (const d of (b.debts ?? [])) debt += Number(d.amount_p ?? 0);
+      for (const s of (b.sources ?? [])) src += Number(s.amount_p ?? 0);
+    }
+    const teamCount = (doc.teams ?? []).length;
+    cards.push({ g, stats: `${gbp(src - debt)} net · ${teamCount}/3 teams` });
+  } catch {
+    cards.push({ g, stats: null });
+  }
+}
+---
+<Layout title="Servers" user={user}>
+  <section class="section">
+    <div class="page-head">
+      <div>
+        <h2>Your servers</h2>
+        <p class="desc">
+          {guilds.length === 1
+            ? '1 server where you are admin and the bot is added.'
+            : `${guilds.length} servers where you are admin and the bot is added.`}
+        </p>
+      </div>
+      <a class="btn btn-small" href="/invite">+ Invite to server</a>
+    </div>
+    {guilds.length === 0 ? (
+      <div class="notice">No servers found. <a href="/invite">Add the bot</a> to your server first, then refresh this page.</div>
+    ) : null}
+    <div class="grid" style="margin-top:16px">
+      {cards.map((c: any, i: number) => (
+        <GuildCard name={c.g.name} guildId={String(c.g.id)} icon={c.g.icon ?? null} stats={c.stats} delay={(i % 6) * 70} />
+      ))}
+      <a class="card lift add-card reveal" style={`transition-delay:${(cards.length % 6) * 70}ms`} href="/invite">
+        <div class="add-plus">+</div>
+        <h3>Add to a server</h3>
+        <p>Get the invite link for somewhere new.</p>
+      </a>
+    </div>
+  </section>
+</Layout>

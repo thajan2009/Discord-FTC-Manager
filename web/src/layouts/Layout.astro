@@ -1,0 +1,95 @@
+---
+import { ViewTransitions } from 'astro:transitions';
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  user?: { username: string } | null;
+}
+
+const { title, user = null } = Astro.props;
+---
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="FTCManager — shared balance tracking, inventory and custom commands for your Discord server." />
+  <meta property="og:title" content="FTCManager — run your server like a pro team" />
+  <meta property="og:description" content="Shared balance tracking, inventory and custom commands for Discord." />
+  <meta property="og:image" content="/logo.png" />
+  <meta name="theme-color" content="#08080b" />
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+  <title>{title} — FTCManager</title>
+  <ViewTransitions />
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+  <div id="loader" class="loader" aria-hidden="true">
+    <img class="loader-logo" src="/logo.png" alt="" />
+    <div class="loader-ring"></div>
+    <div class="loader-text">Loading…</div>
+  </div>
+  <div class="wrap">
+    <nav class="nav">
+      <a class="brand" href="/"><img class="brand-logo" src="/logo.png" alt="FTCManager logo" />FTC<span>Manager</span></a>
+      <div class="nav-links">
+        {user ? (
+          <>
+            <span class="user">{user.username}</span>
+            <a href="/dashboard">Servers</a>
+            <a href="/invite">Invite</a>
+            <a href="/api/auth/logout">Logout</a>
+          </>
+        ) : (
+          <>
+            <a href="/invite">Invite</a>
+            <a class="btn btn-small" href="/api/auth/login">Login with Discord</a>
+          </>
+        )}
+      </div>
+    </nav>
+    <main>
+      <slot />
+    </main>
+    <footer class="footer">
+      <span>FTCManager — finance, inventory and custom commands for Discord.</span>
+      <span>Made by WilSonic Boom #33001</span>
+      <span><a href="/dashboard">Dashboard</a> · <a href="/invite">Invite</a> · Built with Astro</span>
+    </footer>
+  </div>
+  <script>
+    // Guard: view-transition swaps re-run scripts — bind once.
+    if (!window.__ftc_init) {
+      window.__ftc_init = true;
+      // Scroll-reveal: elements with .reveal fade/slide in once visible.
+      const initReveal = () => {
+        const els = document.querySelectorAll('.reveal:not(.visible)');
+        if ('IntersectionObserver' in window && els.length) {
+          const io = new IntersectionObserver((entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) {
+                e.target.classList.add('visible');
+                io.unobserve(e.target);
+              }
+            }
+          }, { threshold: 0.12 });
+          els.forEach((el) => io.observe(el));
+        } else {
+          els.forEach((el) => el.classList.add('visible'));
+        }
+      };
+      // Branded loading screen during SPA-style page swaps.
+      const showLoader = () => document.getElementById('loader')?.classList.add('on');
+      const hideLoader = () => document.getElementById('loader')?.classList.remove('on');
+      document.addEventListener('astro:before-preparation', showLoader);
+      document.addEventListener('astro:after-swap', () => { hideLoader(); initReveal(); });
+      document.addEventListener('astro:page-load', () => { hideLoader(); initReveal(); });
+      initReveal();
+    }
+  </script>
+</body>
+</html>

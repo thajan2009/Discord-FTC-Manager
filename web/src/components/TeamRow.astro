@@ -1,0 +1,23 @@
+---
+interface Props {
+  guildId: string;
+  team: { id: string; name: string; aliases?: string[] };
+}
+const { guildId, team } = Astro.props;
+---
+<div class="row-item">
+  <div class="meta">
+    <div class="title">{team.name}</div>
+    <div class="detail">
+      {(team.aliases ?? []).length > 0 ? (
+        (team.aliases ?? []).map((a: string) => <span class="chip">{a}</span>)
+      ) : (
+        <span class="empty">no aliases</span>
+      )}
+    </div>
+  </div>
+  <form method="POST" action={`/api/guilds/${guildId}/teams/delete`} onsubmit="return confirm('Delete this team? Its finance and inventory entries go away too.')">
+    <input type="hidden" name="team_id" value={team.id} />
+    <button class="btn-danger" type="submit">Delete</button>
+  </form>
+</div>

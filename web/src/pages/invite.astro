@@ -1,0 +1,59 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { getSessionUser } from '../lib/session';
+
+const user = getSessionUser(Astro.request);
+const clientId = process.env.DISCORD_CLIENT_ID ?? '';
+// Send Messages + Embed Links + Read History + Use Slash Commands
+const perms = '2147567680';
+const inviteUrl = clientId
+  ? `https://discord.com/api/oauth2/authorize?client_id=${clientId}&permissions=${perms}&scope=bot%20applications.commands`
+  : '';
+---
+<Layout title="Invite" user={user}>
+  <section class="hero">
+    <span class="pill">Get the bot into your server</span>
+    <h1>Add FTCManager <span class="gradient-text">in one click</span></h1>
+    <p>You need <strong>Manage Server</strong> permission. Pick your server on the Discord screen, approve, then come back here.</p>
+    {inviteUrl ? (
+      <>
+        <div class="hero-cta">
+          <a class="btn" href={inviteUrl}>Add to Discord</a>
+          <button class="btn btn-ghost" id="copyBtn" type="button">Copy link</button>
+        </div>
+        <div class="form-card reveal" style="max-width:640px;margin:28px auto 0;text-align:left">
+          <div class="field">
+            <label>Invite link</label>
+            <input id="inviteLink" readonly value={inviteUrl} onclick="this.select()" />
+          </div>
+        </div>
+      </>
+    ) : (
+      <div class="notice">Invite link unavailable: DISCORD_CLIENT_ID is not configured on this site.</div>
+    )}
+  </section>
+
+  <section class="section">
+    <h2 class="reveal">After adding</h2>
+    <div class="grid">
+      <div class="card lift reveal"><div class="step-num">STEP 1</div><h3>Open Servers</h3><p>Your server appears on the <a href="/dashboard">dashboard</a> once the bot has joined.</p></div>
+      <div class="card lift reveal" style="transition-delay:100ms"><div class="step-num">STEP 2</div><h3>Create teams</h3><p>Add up to 3 teams with short aliases for <code class="cmd">!bal</code> and <code class="cmd">!inv</code>.</p></div>
+      <div class="card lift reveal" style="transition-delay:200ms"><div class="step-num">STEP 3</div><h3>Track from chat</h3><p>Type <code class="cmd">!ping</code> to confirm the bot is alive, then start tracking.</p></div>
+    </div>
+  </section>
+
+  <script>
+    const btn = document.getElementById('copyBtn');
+    btn?.addEventListener('click', async () => {
+      const input = document.getElementById('inviteLink') as HTMLInputElement | null;
+      if (!input) return;
+      try {
+        await navigator.clipboard.writeText(input.value);
+        btn.textContent = 'Copied!';
+        setTimeout(() => (btn.textContent = 'Copy link'), 1500);
+      } catch {
+        input.select();
+      }
+    });
+  </script>
+</Layout>
