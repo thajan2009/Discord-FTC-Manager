@@ -73,9 +73,18 @@ async def team_autocomplete(interaction: discord.Interaction, current: str):
 
 
 class AddItemModal(discord.ui.Modal):
-    def __init__(self, team_id: str | None, team_label: str):
+    def __init__(
+        self, team_id: str | None, team_label: str,
+        orig_msg: discord.Message | None = None,
+        scope_id: str | None = None, scope_label: str = "server",
+        picker_msg: discord.Message | None = None,
+    ):
         super().__init__(title=f"Add item — {team_label}")
         self.team_id = team_id
+        self.orig_msg = orig_msg
+        self.scope_id = scope_id
+        self.scope_label = scope_label
+        self.picker_msg = picker_msg
         self.name_input = discord.ui.TextInput(label="Item name", max_length=60)
         self.qty_input = discord.ui.TextInput(label="Quantity", placeholder="e.g. 5", max_length=10)
         self.add_item(self.name_input)
@@ -110,13 +119,24 @@ class AddItemModal(discord.ui.Modal):
                 "Easy — a save just went through. Wait a second and try again.", ephemeral=True
             )
         await save_guild_doc(doc)
+        await refresh_inventory_msg(self.orig_msg, interaction.guild, self.scope_id, self.scope_label)
+        if self.picker_msg is not None:
+            try:
+                await self.picker_msg.delete()
+            except Exception:
+                pass
         await interaction.response.send_message(msg, ephemeral=True)
 
 
 class SetQtyModal(discord.ui.Modal):
-    def __init__(self, team_id: str | None, team_label: str):
+    def __init__(
+        self, team_id: str | None, team_label: str,
+        orig_msg: discord.Message | None = None,
+    ):
         super().__init__(title=f"Set quantity — {team_label}")
         self.team_id = team_id
+        self.team_label = team_label
+        self.orig_msg = orig_msg
         self.name_input = discord.ui.TextInput(label="Item name (exact, as shown)", max_length=60)
         self.qty_input = discord.ui.TextInput(label="New quantity", max_length=10)
         self.add_item(self.name_input)
@@ -144,13 +164,19 @@ class SetQtyModal(discord.ui.Modal):
                 "Easy — a save just went through. Wait a second and try again.", ephemeral=True
             )
         await save_guild_doc(doc)
+        await refresh_inventory_msg(self.orig_msg, interaction.guild, self.team_id, self.team_label)
         await interaction.response.send_message(f"Set `{item['name']}` x {qty}.", ephemeral=True)
 
 
 class RemoveItemModal(discord.ui.Modal):
-    def __init__(self, team_id: str | None, team_label: str):
+    def __init__(
+        self, team_id: str | None, team_label: str,
+        orig_msg: discord.Message | None = None,
+    ):
         super().__init__(title=f"Remove item — {team_label}")
         self.team_id = team_id
+        self.team_label = team_label
+        self.orig_msg = orig_msg
         self.name_input = discord.ui.TextInput(label="Item name (exact, as shown)", max_length=60)
         self.add_item(self.name_input)
 
@@ -178,11 +204,13 @@ class RemoveItemModal(discord.ui.Modal):
                 "Easy — a save just went through. Wait a second and try again.", ephemeral=True
             )
         await save_guild_doc(doc)
+        await refresh_inventory_msg(self.orig_msg, interaction.guild, self.team_id, self.team_label)
         await interaction.response.send_message(f"Removed `{name}`.", ephemeral=True)
 
 
 class ItemTeamPickSelect(discord.ui.Select):
-    """Dropdown to choose which team an item is added to (modals can't hold one)."""
+    """Dropdown to choose which team an item is added to (modals can't hold one).
+    Picking only stages the choice — the tick button below confirms it."""
 
     def __init__(self, teams: list, current_id: str | None):
         options = [
@@ -198,17 +226,69 @@ class ItemTeamPickSelect(discord.ui.Select):
                     default=(t["id"] == current_id),
                 )
             )
-        super().__init__(placeholder="Choose a team first…", options=options)
+        super().__init__(placeholder="Choose a team… (or just press ✅)", options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        doc = await get_guild_doc(interaction.guild_id)
         value = self.values[0]
-        if value == "_server":
+        self.view.selected = None if value == "_server" else value
+        await interaction.response.defer_update()
+
+
+class ItemPickView(discord.ui.View):
+    """Team dropdown + tick to confirm. Tick accepts the preselected default,
+    so on the combined view you just press ✅ for Server."""
+
+    def __init__(
+        self, teams: list, current_id: str | None,
+        orig_msg: discord.Message | None, scope_id: str | None, scope_label: str,
+    ):
+        super().__init__(timeout=120)
+        self.orig_msg = orig_msg
+        self.scope_id = scope_id
+        self.scope_label = scope_label
+        self.selected = current_id  # None = Server (combined)
+        self.add_item(ItemTeamPickSelect(teams, current_id))
+
+    @discord.ui.button(label="✅", style=discord.ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        doc = await get_guild_doc(interaction.guild_id)
+        if self.selected is None:
             team_id, label = None, "server"
         else:
-            team_id = value
-            label = next((t.get("name", "?") for t in doc.get("teams", []) if t.get("id") == value), "?")
-        await interaction.response.send_modal(AddItemModal(team_id, label))
+            team_id = self.selected
+            label = next(
+                (t.get("name", "?") for t in doc.get("teams", []) if t.get("id") == self.selected),
+                "?",
+            )
+        await interaction.response.send_modal(
+            AddItemModal(
+                team_id, label,
+                orig_msg=self.orig_msg, scope_id=self.scope_id, scope_label=self.scope_label,
+                picker_msg=interaction.message,
+            )
+        )
+
+
+async def refresh_inventory_msg(
+    msg: discord.Message | None, guild: discord.Guild, scope_id: str | None, scope_label: str
+) -> None:
+    """Re-render the original inventory message after a change."""
+    if msg is None:
+        return
+    try:
+        doc = await get_guild_doc(guild.id)
+        if scope_id is None:
+            items = combined_stock(doc)
+            title = f"Inventory — {guild.name} (combined)"
+        else:
+            items = team_stock(doc, scope_id).get("items", [])
+            title = f"Inventory — {scope_label}"
+        await msg.edit(
+            embed=inventory_embed(title, items),
+            view=InventoryView(scope_id, scope_label),
+        )
+    except Exception:
+        pass  # original message deleted — ephemeral confirm still sent
 
 
 class InventoryView(discord.ui.View):
@@ -225,19 +305,25 @@ class InventoryView(discord.ui.View):
             return await interaction.response.send_message(
                 "Only admins can manage inventory.", ephemeral=True
             )
-        view = discord.ui.View(timeout=120)
-        view.add_item(ItemTeamPickSelect(doc.get("teams", []), self.team_id))
+        view = ItemPickView(
+            doc.get("teams", []), self.team_id,
+            interaction.message, self.team_id, self.team_label,
+        )
         await interaction.response.send_message(
             "Add item to which team?", view=view, ephemeral=True
         )
 
     @discord.ui.button(label="Set Qty", style=discord.ButtonStyle.blurple)
     async def set_qty(self, interaction: discord.Interaction, _b: discord.ui.Button):
-        await interaction.response.send_modal(SetQtyModal(self.team_id, self.team_label))
+        await interaction.response.send_modal(
+            SetQtyModal(self.team_id, self.team_label, orig_msg=interaction.message)
+        )
 
     @discord.ui.button(label="Remove", style=discord.ButtonStyle.red)
     async def remove_item(self, interaction: discord.Interaction, _b: discord.ui.Button):
-        await interaction.response.send_modal(RemoveItemModal(self.team_id, self.team_label))
+        await interaction.response.send_modal(
+            RemoveItemModal(self.team_id, self.team_label, orig_msg=interaction.message)
+        )
 
 
 class Inventory(commands.Cog):
