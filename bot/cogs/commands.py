@@ -11,7 +11,7 @@ import discord
 from discord.ext import commands
 
 from data.ftchelp import FTCHELP
-from db.mongo import get_global_commands, get_guild_doc, save_guild_doc
+from db.mongo import get_fresh_guild_doc, get_global_commands, get_guild_doc, save_guild_doc
 from utils.perms import is_admin
 
 FTCHELP_PER_PAGE = 10
@@ -70,7 +70,7 @@ class CustomCommands(commands.Cog):
         trigger = trigger.lower().lstrip("!")
         if not trigger or " " in trigger:
             return await ctx.send("Trigger must be one word, e.g. `!addcmd hello Hi there!`")
-        doc = await get_guild_doc(ctx.guild.id)
+        doc = await get_fresh_guild_doc(ctx.guild.id)
         cmds = doc.get("commands", [])
         cmds = [c for c in cmds if c.get("trigger") != trigger]
         cmds.append({"trigger": trigger, "response": response})
@@ -85,7 +85,7 @@ class CustomCommands(commands.Cog):
         if not is_admin(ctx.author):
             return await ctx.send("Only server admins can delete commands.")
         trigger = trigger.lower().lstrip("!")
-        doc = await get_guild_doc(ctx.guild.id)
+        doc = await get_fresh_guild_doc(ctx.guild.id)
         before = len(doc.get("commands", []))
         doc["commands"] = [c for c in doc.get("commands", []) if c.get("trigger") != trigger]
         await save_guild_doc(doc)

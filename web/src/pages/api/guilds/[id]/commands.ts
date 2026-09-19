@@ -22,9 +22,12 @@ export const POST: APIRoute = async ({ request, params }) => {
   if (!trigger || !response) return back(id, gate.ok.refreshed, 'command-required');
   if (/\s/.test(trigger)) return back(id, gate.ok.refreshed, 'trigger-spaces');
   const c = await col();
-  const doc: any = await c.findOne({ _type: 'guild', guild_id: id });
-  const cmds = (doc?.commands ?? []).filter((x: any) => x.trigger !== trigger);
-  cmds.push({ trigger, response });
-  await c.updateOne({ _type: 'guild', guild_id: id }, { $set: { commands: cmds } }, { upsert: true });
+  // Atomic replace-by-trigger (no read-modify-write): concurrent adds can't wipe each other.
+  await c.updateOne({ _type: 'guild', guild_id: id }, { $pull: { commands: { trigger } } as any });
+  await c.updateOne(
+    { _type: 'guild', guild_id: id },
+    { $push: { commands: { trigger, response } } as any },
+    { upsert: true },
+  );
   return back(id, gate.ok.refreshed);
 };

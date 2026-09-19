@@ -102,7 +102,7 @@ for (const [key, bucket] of Object.entries<any>(doc.inventory?.teams ?? {})) {
       {teams.map((t: any) => <TeamRow guildId={String(id)} team={t} />)}
     </div>
     {teams.length < 3 ? (
-      <form class="form-card" method="POST" action={`/api/guilds/${id}/teams`}>
+      <form class="form-card" method="POST" action={`/api/guilds/${id}/teams`} onsubmit="this.querySelector('button').disabled = true">
         <div class="form-row">
           <div class="field"><label>Team name</label><input name="name" placeholder="Robotics Team #1" required /></div>
           <div class="field"><label>Aliases (comma separated)</label><input name="aliases" placeholder="first, one, 1" /></div>
@@ -120,7 +120,7 @@ for (const [key, bucket] of Object.entries<any>(doc.inventory?.teams ?? {})) {
     <div class="row-list">
       {cmds.map((c: any) => <CommandRow guildId={String(id)} cmd={c} />)}
     </div>
-    <form class="form-card" method="POST" action={`/api/guilds/${id}/commands`}>
+    <form class="form-card" method="POST" action={`/api/guilds/${id}/commands`} onsubmit="this.querySelector('button').disabled = true">
       <div class="form-row">
         <div class="field"><label>Trigger (one word)</label><input name="trigger" placeholder="practice" required /></div>
         <div class="field"><label>Response</label><input name="response" placeholder="Practice is Tuesdays at 6pm" required /></div>

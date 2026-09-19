@@ -35,7 +35,11 @@ export const POST: APIRoute = async ({ request, params }) => {
   for (const a of aliases) {
     if (taken.has(a.toLowerCase())) return back(id, gate.ok.refreshed, 'alias-taken');
   }
-  teams.push({ id: uid(), name, aliases });
-  await c.updateOne({ _type: 'guild', guild_id: id }, { $set: { teams } }, { upsert: true });
+  // Atomic append (no read-modify-write): concurrent adds can never wipe each other.
+  await c.updateOne(
+    { _type: 'guild', guild_id: id },
+    { $push: { teams: { id: uid(), name, aliases } } as any },
+    { upsert: true },
+  );
   return back(id, gate.ok.refreshed);
 };

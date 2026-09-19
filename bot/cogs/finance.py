@@ -14,7 +14,7 @@ from discord.ext import commands
 
 from datetime import datetime, timezone
 
-from db.mongo import claim_write_slot, get_guild_doc, resolve_team, save_guild_doc, suggest_team
+from db.mongo import claim_write_slot, get_fresh_guild_doc, get_guild_doc, resolve_team, save_guild_doc, suggest_team
 from utils.money import clean_symbol, format_money, parse_amount_to_pence
 from utils.perms import can_manage
 
@@ -105,7 +105,7 @@ class AddEntryModal(discord.ui.Modal):
         self.add_item(self.amount_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        doc = await get_guild_doc(interaction.guild_id)
+        doc = await get_fresh_guild_doc(interaction.guild_id)
         mode = doc.get("settings", {}).get("finance_mode", "everyone")
         if not can_manage(mode, interaction.user):
             return await interaction.response.send_message("Only admins can manage finance.", ephemeral=True)
@@ -213,7 +213,7 @@ class RemoveEntryModal(discord.ui.Modal):
         self.add_item(self.name_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        doc = await get_guild_doc(interaction.guild_id)
+        doc = await get_fresh_guild_doc(interaction.guild_id)
         mode = doc.get("settings", {}).get("finance_mode", "everyone")
         if not can_manage(mode, interaction.user):
             return await interaction.response.send_message("Only admins can manage finance.", ephemeral=True)
@@ -291,7 +291,7 @@ class Finance(commands.Cog):
     @commands.guild_only()
     async def findel(self, ctx: commands.Context, *, name: str):
         """!findel <exact name> — remove a debt/source by typing its name exactly."""
-        doc = await get_guild_doc(ctx.guild.id)
+        doc = await get_fresh_guild_doc(ctx.guild.id)
         mode = doc.get("settings", {}).get("finance_mode", "everyone")
         if not can_manage(mode, ctx.author):
             return await ctx.send("Only admins can manage finance.")

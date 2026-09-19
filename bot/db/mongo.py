@@ -70,6 +70,14 @@ async def ensure_indexes() -> None:
         await col.create_index([("_type", 1), ("guild_id", 1)], name="type_guild", background=True)
     except Exception as exc:
         print(f"[mongo] index skipped: {exc}")
+    try:
+        col = get_collection()
+        await col.create_index(
+            [("_type", 1), ("guild_id", 1)], name="type_guild_unique", unique=True, background=True
+        )
+    except Exception as exc:
+        # Fails only if duplicate guild docs already exist; harmless either way.
+        print(f"[mongo] unique index skipped: {exc}")
 
 
 def _lock_for(gid: str) -> asyncio.Lock:
@@ -122,13 +130,51 @@ async def get_guild_doc(guild_id: int | str) -> dict:
         return _cache[gid]
 
 
+# Sections the bot owns. On save, these come from the bot's copy; everything
+# else (teams, settings — managed on the website) is preserved from the DB so
+# a stale in-memory copy can never wipe website changes.
+BOT_OWNED = ("finance", "inventory", "commands")
+
+
 async def save_guild_doc(doc: dict) -> None:
-    """Write-through: cache now, Mongo backup immediately (serialized per guild)."""
+    """Write-through with merge: bot-owned sections win, website-owned sections
+    (teams/settings) are preserved from the database. Serialized per guild."""
     gid = str(doc.get("guild_id", ""))
-    _cache[gid] = doc
     async with _lock_for(gid):
         col = get_collection()
-        await col.replace_one({"_id": doc["_id"]}, doc, upsert=True)
+        fresh = await col.find_one({"_type": "guild", "guild_id": gid})
+        if fresh is None:
+            fresh = doc
+        else:
+            for key in BOT_OWNED:
+                if key in doc:
+                    fresh[key] = doc[key]
+        _defaults(fresh)
+        _cache[gid] = fresh
+        await col.replace_one({"_id": fresh["_id"]}, fresh, upsert=True)
+
+
+async def get_fresh_guild_doc(guild_id: int | str) -> dict:
+    """Bypass the cache and re-read from Mongo. Use this in every handler that
+    MUTATES data, so concurrent website edits are never overwritten."""
+    gid = str(guild_id)
+    async with _lock_for(gid):
+        col = get_collection()
+        doc = await col.find_one({"_type": "guild", "guild_id": gid})
+        if doc is None:
+            # Create without re-entering the lock (get_guild_doc would deadlock).
+            doc = {
+                "_type": "guild",
+                "guild_id": gid,
+                "teams": [],
+                "settings": {"finance_mode": "everyone", "inventory_mode": "everyone"},
+                "finance": {"teams": {}},
+                "inventory": {"teams": {}},
+                "commands": [],
+            }
+            await col.insert_one(doc)
+        _cache[gid] = _defaults(doc)
+        return _cache[gid]
 
 
 async def get_global_commands() -> dict:
