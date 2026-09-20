@@ -6,6 +6,7 @@ import CommandRow from '../../components/CommandRow.astro';
 import { requireManager } from '../../lib/guard';
 import { SESSION_NAME, SESSION_MAX_AGE, sessionValue } from '../../lib/session';
 import { getGuild } from '../../lib/mongo';
+import { fetchSheet } from '../../lib/sheets';
 
 const { id } = Astro.params;
 const gate = await requireManager(String(id), Astro.request);
@@ -31,6 +32,7 @@ const errorMessages: Record<string, string> = {
   'trigger-spaces': 'Trigger must be one word (no spaces).',
   'bad-amount': 'Amount must be a number like 25 or 25.50.',
   'bad-qty': 'Quantity must be a whole number (0 or more).',
+  'bad-sheet-url': 'That Google Sheets link looks wrong — paste the full share URL.',
   missing: 'Something was missing — please try again.',
 };
 const pounds = (p: number) => (Number(p) / 100).toFixed(2);
@@ -80,6 +82,37 @@ const outItems: any[] = [];
 for (const [key, bucket] of Object.entries<any>(doc.outreach?.teams ?? {})) {
   if (!validBuckets.has(key)) continue;
   for (const it of (bucket.items ?? [])) outItems.push({ bucket: key, name: it.name, by: it.by ?? null });
+}
+
+// Spreadsheet-linked inventory (read-only): fetch once, then sort + filter.
+const invSource = settings.inventory_source === 'sheet' && String(settings.sheet_url ?? '').trim() ? 'sheet' : 'manual';
+let sheetItems: any[] = [];
+let sheetError: string | null = null;
+let sheetVendors: string[] = [];
+let sheetCategories: string[] = [];
+if (invSource === 'sheet') {
+  const sheet = await fetchSheet(String(settings.sheet_url));
+  sheetError = sheet.error;
+  const q = Astro.url.searchParams;
+  const sortKey = ['name', 'qty', 'vendor', 'category'].includes(q.get('sort') ?? '') ? q.get('sort')! : 'name';
+  const dir = q.get('dir') === 'desc' ? -1 : 1;
+  const fVendor = q.get('vendor') ?? '';
+  const fCategory = q.get('category') ?? '';
+  sheetVendors = [...new Set(sheet.items.map((i) => i.vendor).filter(Boolean))].sort();
+  sheetCategories = [...new Set(sheet.items.map((i) => i.category).filter(Boolean))].sort();
+  sheetItems = sheet.items
+    .filter((i) => (!fVendor || i.vendor === fVendor) && (!fCategory || i.category === fCategory));
+  const val = (i: any) => sortKey === 'qty' ? i.qty : (i[sortKey] ?? '').toLowerCase();
+  sheetItems = [...sheetItems].sort((a, b) => {
+    const va = val(a), vb = val(b);
+    return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+  });
+  var sheetSort = sortKey, sheetDir = dir === -1 ? 'desc' : 'asc';
+  var sheetFVendor = fVendor, sheetFCategory = fCategory;
+  if (!sheetError) {
+    itemKinds = sheet.items.length;
+    itemQty = sheet.items.reduce((n: number, i: any) => n + i.qty, 0);
+  }
 }
 ---
 <Layout title="Manage server" user={user}>
@@ -204,35 +237,105 @@ for (const [key, bucket] of Object.entries<any>(doc.outreach?.teams ?? {})) {
 
   <section class="section reveal">
     <h2>Inventory details</h2>
-    <p class="desc">Every item across teams. Change quantities from Discord with Set Qty.</p>
-    {invItems.length === 0 ? (
-      <p class="empty">Nothing tracked yet. Type <code class="cmd">!inv</code> in Discord to get started.</p>
-    ) : (
-      <div class="row-list">
-        {invItems.map((it: any) => (
-          <div class="row-item">
-            <div class="meta">
-              <div class="title">{it.name} x {it.qty}</div>
-              <div class="detail">{bucketLabel(it.bucket)}{it.by ? ` · added by ${it.by}` : ''}</div>
-              <details class="edit">
-                <summary>Edit name / quantity</summary>
-                <form method="POST" action={`/api/guilds/${id}/inventory/edit`}>
-                  <input type="hidden" name="bucket" value={it.bucket} />
-                  <input type="hidden" name="oldname" value={it.name} />
-                  <input name="name" value={it.name} required maxlength="60" aria-label="Item name" />
-                  <input name="qty" value={it.qty} required inputmode="numeric" aria-label="Quantity" />
-                  <button class="btn btn-small" type="submit">Save</button>
-                </form>
-              </details>
-            </div>
-            <form method="POST" action={`/api/guilds/${id}/inventory/delete`} onsubmit="return confirm('Delete this item?')">
-              <input type="hidden" name="bucket" value={it.bucket} />
-              <input type="hidden" name="name" value={it.name} />
-              <button class="btn-danger" type="submit">Delete</button>
+    {invSource === 'sheet' ? (
+      <>
+        <p class="desc">
+          Read-only — linked spreadsheet (<a href={String(settings.sheet_url)} target="_blank" rel="noreferrer">open sheet</a>).
+          Change it back to manual tracking in settings below to edit here and in Discord.
+        </p>
+        {sheetError ? (
+          <div class="notice" style="border-color:var(--red)">{sheetError}</div>
+        ) : (
+          <>
+            <form class="form-card" method="GET" action={`/guild/${id}`}>
+              <div class="form-row">
+                <div class="field">
+                  <label>Sort by</label>
+                  <select name="sort">
+                    <option value="name" selected={sheetSort === 'name'}>Part name</option>
+                    <option value="qty" selected={sheetSort === 'qty'}>Stock</option>
+                    <option value="vendor" selected={sheetSort === 'vendor'}>Vendor</option>
+                    <option value="category" selected={sheetSort === 'category'}>Category</option>
+                  </select>
+                </div>
+                <div class="field" style="flex:0 1 130px">
+                  <label>Direction</label>
+                  <select name="dir">
+                    <option value="asc" selected={sheetDir !== 'desc'}>A → Z</option>
+                    <option value="desc" selected={sheetDir === 'desc'}>Z → A</option>
+                  </select>
+                </div>
+                {sheetVendors.length > 0 ? (
+                  <div class="field">
+                    <label>Vendor</label>
+                    <select name="vendor">
+                      <option value="">All vendors</option>
+                      {sheetVendors.map((v: string) => <option value={v} selected={sheetFVendor === v}>{v}</option>)}
+                    </select>
+                  </div>
+                ) : null}
+                {sheetCategories.length > 0 ? (
+                  <div class="field">
+                    <label>Category</label>
+                    <select name="category">
+                      <option value="">All categories</option>
+                      {sheetCategories.map((c: string) => <option value={c} selected={sheetFCategory === c}>{c}</option>)}
+                    </select>
+                  </div>
+                ) : null}
+                <div><button class="btn btn-small" type="submit">Apply</button></div>
+              </div>
             </form>
+            {sheetItems.length === 0 ? (
+              <p class="empty" style="margin-top:12px">No items match.</p>
+            ) : (
+              <div class="row-list" style="margin-top:12px">
+                {sheetItems.map((it: any) => (
+                  <div class="row-item">
+                    <div class="meta">
+                      <div class="title">{it.name} x {it.qty}</div>
+                      <div class="detail">{[it.vendor, it.category].filter(Boolean).join(' · ') || '—'}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </>
+    ) : (
+      <>
+        <p class="desc">Every item across teams. Change quantities from Discord with Set Qty — or link a spreadsheet in settings below for read-only tracking.</p>
+        {invItems.length === 0 ? (
+          <p class="empty">Nothing tracked yet. Type <code class="cmd">!inv</code> in Discord to get started.</p>
+        ) : (
+          <div class="row-list">
+            {invItems.map((it: any) => (
+              <div class="row-item">
+                <div class="meta">
+                  <div class="title">{it.name} x {it.qty}</div>
+                  <div class="detail">{bucketLabel(it.bucket)}{it.by ? ` · added by ${it.by}` : ''}</div>
+                  <details class="edit">
+                    <summary>Edit name / quantity</summary>
+                    <form method="POST" action={`/api/guilds/${id}/inventory/edit`}>
+                      <input type="hidden" name="bucket" value={it.bucket} />
+                      <input type="hidden" name="oldname" value={it.name} />
+                      <input name="name" value={it.name} required maxlength="60" aria-label="Item name" />
+                      <input name="qty" value={it.qty} required inputmode="numeric" aria-label="Quantity" />
+                      <button class="btn btn-small" type="submit">Save</button>
+                    </form>
+                  </details>
+                </div>
+                <form method="POST" action={`/api/guilds/${id}/inventory/delete`} onsubmit="return confirm('Delete this item?')">
+                  <input type="hidden" name="bucket" value={it.bucket} />
+                  <input type="hidden" name="name" value={it.name} />
+                  <button class="btn-danger" type="submit">Delete</button>
+                </form>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        )}
+      </>
     )}
   </section>
 
@@ -261,8 +364,8 @@ for (const [key, bucket] of Object.entries<any>(doc.outreach?.teams ?? {})) {
   </section>
 
   <section class="section reveal">
-    <h2>Permissions &amp; currency</h2>
-    <p class="desc">Who can add, change or remove finance and inventory entries — plus the currency symbol (£ by default).</p>
+    <h2>Permissions, currency &amp; inventory source</h2>
+    <p class="desc">Who can change things, which currency symbol to show (£ by default), and where inventory lives. Linking a spreadsheet makes inventory read-only everywhere — columns needed: Part Name, Current Stock (optional Vendor / Category sorters).</p>
     <form class="form-card" method="POST" action={`/api/guilds/${id}/settings`}>
       <div class="form-row">
         <div class="field">
@@ -289,6 +392,19 @@ for (const [key, bucket] of Object.entries<any>(doc.outreach?.teams ?? {})) {
         <div class="field" style="flex:0 1 140px">
           <label>Currency symbol</label>
           <input name="currency" value={currency} required maxlength="3" aria-label="Currency symbol" />
+        </div>
+      </div>
+      <div class="form-row" style="margin-top:10px">
+        <div class="field">
+          <label>Inventory source</label>
+          <select name="inventory_source">
+            <option value="manual" selected={invSource !== 'sheet'}>Manual (Discord + website)</option>
+            <option value="sheet" selected={invSource === 'sheet'}>Google Sheet (read-only)</option>
+          </select>
+        </div>
+        <div class="field" style="flex:2 1 260px">
+          <label>Spreadsheet link (share as “Anyone with the link”)</label>
+          <input name="sheet_url" value={String(settings.sheet_url ?? '')} placeholder="https://docs.google.com/spreadsheets/d/…" aria-label="Spreadsheet link" />
         </div>
         <div><button class="btn btn-small" type="submit">Save</button></div>
       </div>

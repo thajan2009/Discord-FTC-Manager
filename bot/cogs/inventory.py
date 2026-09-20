@@ -11,10 +11,50 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+import asyncio
 from datetime import datetime, timezone
 
 from db.mongo import claim_write_slot, get_fresh_guild_doc, get_guild_doc, resolve_team, save_guild_doc, suggest_team
 from utils.perms import can_manage
+from utils.sheets import fetch_sheet_items
+
+
+def inventory_source(doc: dict) -> str:
+    s = doc.get("settings", {})
+    if s.get("inventory_source") == "sheet" and (s.get("sheet_url") or "").strip():
+        return "sheet"
+    return "manual"
+
+
+async def sheet_data(doc: dict) -> dict:
+    return await asyncio.to_thread(
+        fetch_sheet_items, doc.get("settings", {}).get("sheet_url", "")
+    )
+
+
+def sheet_embed(title: str, data: dict) -> discord.Embed:
+    e = discord.Embed(title=title, colour=discord.Colour.teal())
+    if data.get("error"):
+        e.description = data["error"]
+    elif not data.get("items"):
+        e.description = "The linked sheet has no items."
+    else:
+        lines = []
+        for it in data["items"][:25]:
+            line = f"{it['name']} x {it['qty']}"
+            bits = [b for b in (it.get("vendor", ""), it.get("category", "")) if b]
+            if bits:
+                line += " · " + " / ".join(bits)
+            lines.append(line)
+        if len(data["items"]) > 25:
+            lines.append(f"+{len(data['items']) - 25} more — see the website or sheet.")
+        e.description = "\n".join(lines)
+    e.set_footer(text="Read-only — managed in the linked Google Sheet.")
+    return e
+
+
+READONLY_MSG = ("Inventory is linked to a spreadsheet and read-only. "
+                "Unlink it on the website to edit here.")
 
 
 def team_stock(doc: dict, team_id: str | None) -> dict:
@@ -102,6 +142,8 @@ class AddItemModal(discord.ui.Modal):
         name = self.name_input.value.strip()
         stock = team_stock(doc, self.team_id)
         existing = find_item(stock.get("items", []), name)
+        if inventory_source(doc) == "sheet":
+            return await interaction.response.send_message(READONLY_MSG, ephemeral=True)
         now = datetime.now(timezone.utc).isoformat()
         if existing is not None:
             existing["qty"] = int(existing.get("qty", 0)) + qty
@@ -153,6 +195,8 @@ class SetQtyModal(discord.ui.Modal):
             return await interaction.response.send_message("Quantity must be a whole number.", ephemeral=True)
         stock = team_stock(doc, self.team_id)
         item = find_item(stock.get("items", []), self.name_input.value)
+        if inventory_source(doc) == "sheet":
+            return await interaction.response.send_message(READONLY_MSG, ephemeral=True)
         if item is None:
             return await interaction.response.send_message(
                 f"No item named `{self.name_input.value.strip()}` here. Type it exactly as shown in `!inv`.",
@@ -186,6 +230,8 @@ class RemoveItemModal(discord.ui.Modal):
         if not can_manage(mode, interaction.user):
             return await interaction.response.send_message("Only admins can manage inventory.", ephemeral=True)
         name = self.name_input.value.strip()
+        if inventory_source(doc) == "sheet":
+            return await interaction.response.send_message(READONLY_MSG, ephemeral=True)
         if self.team_id is None:
             buckets = list(doc.get("inventory", {}).get("teams", {}).values())
         else:
@@ -305,6 +351,8 @@ class InventoryView(discord.ui.View):
             return await interaction.response.send_message(
                 "Only admins can manage inventory.", ephemeral=True
             )
+        if inventory_source(doc) == "sheet":
+            return await interaction.response.send_message(READONLY_MSG, ephemeral=True)
         view = ItemPickView(
             doc.get("teams", []), self.team_id,
             interaction.message, self.team_id, self.team_label,
@@ -337,6 +385,11 @@ class Inventory(commands.Cog):
     @commands.guild_only()
     async def inventory(self, ctx: commands.Context, team: str | None = None):
         doc = await get_guild_doc(ctx.guild.id)
+        if inventory_source(doc) == "sheet":
+            data = await sheet_data(doc)
+            embed = sheet_embed(f"Inventory — {ctx.guild.name} (Google Sheet)", data)
+            await ctx.send(embed=embed)
+            return
         if team:
             team_id, team_name = resolve_team(doc, team)
             if not team_id:
@@ -370,6 +423,8 @@ class Inventory(commands.Cog):
     async def invdel(self, ctx: commands.Context, *, name: str):
         """!invdel <exact name> — remove an item by typing its name exactly."""
         doc = await get_fresh_guild_doc(ctx.guild.id)
+        if inventory_source(doc) == "sheet":
+            return await ctx.send(READONLY_MSG)
         mode = doc.get("settings", {}).get("inventory_mode", "everyone")
         if not can_manage(mode, ctx.author):
             return await ctx.send("Only admins can manage inventory.")

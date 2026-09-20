@@ -113,6 +113,8 @@ def _defaults(doc: dict) -> dict:
     doc["settings"].setdefault("inventory_mode", "everyone")
     doc["settings"].setdefault("outreach_mode", "everyone")
     doc["settings"].setdefault("currency", "£")
+    doc["settings"].setdefault("inventory_source", "manual")
+    doc["settings"].setdefault("sheet_url", "")
     doc.setdefault("finance", {}).setdefault("teams", {})
     doc.setdefault("inventory", {}).setdefault("teams", {})
     doc.setdefault("outreach", {}).setdefault("teams", {})
