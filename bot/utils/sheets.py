@@ -53,18 +53,20 @@ def _parse_qty(raw: str) -> int:
         return 0
 
 
-def fetch_sheet_items(url: str) -> dict:
+def fetch_sheet_items(url: str, force: bool = False) -> dict:
     """Fetch + parse a shared Google Sheet. Returns dict with:
-    items: [{name, qty, vendor, category}], has_vendor, has_category, error."""
+    items: [{name, qty, vendor, category}], has_vendor, has_category, error.
+    force=True skips the cache read (result is still stored)."""
     parsed = extract_sheet(url or "")
     if not parsed:
         return {"items": [], "has_vendor": False, "has_category": False,
                 "error": "That doesn't look like a Google Sheets link."}
     sheet_id, gid = parsed
     cache_key = f"{sheet_id}/{gid}"
-    hit = _cache.get(cache_key)
-    if hit and time.monotonic() - hit[0] < CACHE_TTL:
-        return hit[1]
+    if not force:
+        hit = _cache.get(cache_key)
+        if hit and time.monotonic() - hit[0] < CACHE_TTL:
+            return hit[1]
 
     result: dict = {"items": [], "has_vendor": False, "has_category": False, "error": None}
     try:
@@ -118,3 +120,15 @@ def fetch_sheet_items(url: str) -> dict:
     })
     _cache[cache_key] = (time.monotonic(), result)
     return result
+
+
+def peek_sheet(url: str) -> tuple[dict | None, float | None]:
+    """Cached result with NO network. Returns (result, age_seconds),
+    or (None, None) when nothing is cached yet."""
+    parsed = extract_sheet(url or "")
+    if not parsed:
+        return None, None
+    hit = _cache.get(f"{parsed[0]}/{parsed[1]}")
+    if not hit:
+        return None, None
+    return hit[1], time.monotonic() - hit[0]

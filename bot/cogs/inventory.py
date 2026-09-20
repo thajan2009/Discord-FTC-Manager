@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 
 from db.mongo import claim_write_slot, get_fresh_guild_doc, get_guild_doc, resolve_team, save_guild_doc, suggest_team
 from utils.perms import can_manage
-from utils.sheets import fetch_sheet_items
+from utils.sheets import CACHE_TTL as SHEET_TTL
+from utils.sheets import fetch_sheet_items, peek_sheet
 
 
 def inventory_source(doc: dict) -> str:
@@ -24,33 +25,6 @@ def inventory_source(doc: dict) -> str:
     if s.get("inventory_source") == "sheet" and (s.get("sheet_url") or "").strip():
         return "sheet"
     return "manual"
-
-
-async def sheet_data(doc: dict) -> dict:
-    return await asyncio.to_thread(
-        fetch_sheet_items, doc.get("settings", {}).get("sheet_url", "")
-    )
-
-
-def sheet_embed(title: str, data: dict) -> discord.Embed:
-    e = discord.Embed(title=title, colour=discord.Colour.teal())
-    if data.get("error"):
-        e.description = data["error"]
-    elif not data.get("items"):
-        e.description = "The linked sheet has no items."
-    else:
-        lines = []
-        for it in data["items"][:25]:
-            line = f"{it['name']} x {it['qty']}"
-            bits = [b for b in (it.get("vendor", ""), it.get("category", "")) if b]
-            if bits:
-                line += " · " + " / ".join(bits)
-            lines.append(line)
-        if len(data["items"]) > 25:
-            lines.append(f"+{len(data['items']) - 25} more — see the website or sheet.")
-        e.description = "\n".join(lines)
-    e.set_footer(text="Read-only — managed in the linked Google Sheet.")
-    return e
 
 
 READONLY_MSG = ("Inventory is linked to a spreadsheet and read-only. "
@@ -87,17 +61,173 @@ def find_item(items: list, name: str) -> dict | None:
     return None
 
 
-def inventory_embed(title: str, items: list) -> discord.Embed:
-    e = discord.Embed(title=title, colour=discord.Colour.teal())
-    if not items:
-        e.description = "Nothing here yet — press + Item."
-    else:
-        lines = [f"{it['name']} x {it['qty']}" for it in items[:30]]
-        if len(items) > 30:
-            lines.append(f"+{len(items) - 30} more — check a single team.")
-        e.description = "\n".join(lines)
-    e.set_footer(text="Type names exactly as shown to change or remove them.")
-    return e
+PAGE_SIZE = 10
+SORT_CHOICES = [
+    ("name", "Name (A-Z)"),
+    ("qty_desc", "Stock (high first)"),
+    ("qty_asc", "Stock (low first)"),
+    ("vendor", "Vendor"),
+    ("category", "Category"),
+]
+SORT_PRIORITY = ["category", "vendor", "name", "qty_desc", "qty_asc"]
+SORT_LABELS = dict(SORT_CHOICES)
+
+
+def normalize_items(items: list) -> list:
+    norm = []
+    for it in items:
+        try:
+            qty = int(it.get("qty", 0))
+        except (TypeError, ValueError):
+            qty = 0
+        norm.append({
+            "name": str(it.get("name", "?")),
+            "qty": qty,
+            "vendor": str(it.get("vendor", "") or ""),
+            "category": str(it.get("category", "") or ""),
+        })
+    return norm
+
+
+class InvSortSelect(discord.ui.Select):
+    """Multi-select sort: pick several keys for finer sorting."""
+
+    def __init__(self, available: set, current: list):
+        options = [
+            discord.SelectOption(label=label, value=key, default=(key in current))
+            for key, label in SORT_CHOICES
+            if key in available
+        ]
+        super().__init__(
+            placeholder="Sort by… (pick several)",
+            options=options,
+            min_values=1,
+            max_values=len(options),
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.sort = [k for k in SORT_PRIORITY if k in self.values] or ["name"]
+        self.view.page = 0
+        await interaction.response.edit_message(embed=self.view.render(), view=self.view)
+
+
+class InvBrowseView(discord.ui.View):
+    """Paged inventory with multi-select sorting, plus management buttons
+    (omitted in read-only sheet mode)."""
+
+    def __init__(self, items: list, team_id: str | None, team_label: str, title: str, readonly: bool = False):
+        super().__init__(timeout=300)
+        self.all_items = normalize_items(items)
+        self.team_id = team_id
+        self.team_label = team_label
+        self.title = title
+        self.readonly = readonly
+        self.sort = ["name"]
+        self.page = 0
+        available = {"name", "qty_desc", "qty_asc"}
+        if any(i["vendor"] for i in self.all_items):
+            available.add("vendor")
+        if any(i["category"] for i in self.all_items):
+            available.add("category")
+        # NOTE: must use the unbound View.add_item — self.add_item is the
+        # "+ Item" Button attribute shadowing it (decorator quirk).
+        discord.ui.View.add_item(self, InvSortSelect(available, self.sort))
+        if readonly:
+            # Hide management buttons outright (same shadowing reason).
+            for btn in (self.add_item, self.set_qty, self.remove_item):
+                discord.ui.View.remove_item(self, btn)
+
+    def ordered(self) -> list:
+        items = list(self.all_items)
+        for key in reversed(SORT_PRIORITY):
+            if key not in self.sort:
+                continue
+            if key == "name":
+                items.sort(key=lambda x: x["name"].lower())
+            elif key == "vendor":
+                # Blanks sink to the bottom.
+                items.sort(key=lambda x: (x["vendor"] == "", x["vendor"].lower()))
+            elif key == "category":
+                items.sort(key=lambda x: (x["category"] == "", x["category"].lower()))
+            elif key == "qty_desc":
+                items.sort(key=lambda x: -x["qty"])
+            elif key == "qty_asc":
+                items.sort(key=lambda x: x["qty"])
+        return items
+
+    def render(self) -> discord.Embed:
+        items = self.ordered()
+        total = max(1, (len(items) + PAGE_SIZE - 1) // PAGE_SIZE)
+        self.page = min(max(0, self.page), total - 1)
+        chunk = items[self.page * PAGE_SIZE:(self.page + 1) * PAGE_SIZE]
+        e = discord.Embed(title=self.title, colour=discord.Colour.teal())
+        if not chunk:
+            e.description = "Nothing here yet — press + Item." if not self.readonly else "The linked sheet has no items."
+        else:
+            width = min(26, max(len(it["name"]) for it in chunk))
+            table = []
+            for it in chunk:
+                name = it["name"] if len(it["name"]) <= width else it["name"][:width - 1] + "…"
+                row = f"{name.ljust(width)}  x {it['qty']}"
+                bits = [b for b in (it["vendor"], it["category"]) if b]
+                if bits:
+                    row += "  ·  " + "  /  ".join(bits)
+                table.append(row)
+            e.description = "```\n" + "\n".join(table) + "\n```"
+        sort_names = ", ".join(SORT_LABELS[k] for k in self.sort)
+        if self.readonly:
+            e.set_footer(text=f"Page {self.page + 1}/{total} · Sorted: {sort_names} · Read-only — managed in the linked Google Sheet.")
+        else:
+            e.set_footer(text=f"Page {self.page + 1}/{total} · Sorted: {sort_names} · Type names exactly to change/remove.")
+        self._prev.disabled = self.page <= 0
+        self._next.disabled = self.page >= total - 1
+        return e
+
+    @discord.ui.button(label="Prev", style=discord.ButtonStyle.grey, row=1)
+    async def _prev(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.page -= 1
+        await interaction.response.edit_message(embed=self.render(), view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.grey, row=1)
+    async def _next(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.page += 1
+        await interaction.response.edit_message(embed=self.render(), view=self)
+
+    @discord.ui.button(label="+ Item", style=discord.ButtonStyle.green, row=1)
+    async def add_item(self, interaction: discord.Interaction, _b: discord.ui.Button):
+        if self.readonly:
+            return await interaction.response.send_message(READONLY_MSG, ephemeral=True)
+        doc = await get_guild_doc(interaction.guild_id)
+        mode = doc.get("settings", {}).get("inventory_mode", "everyone")
+        if not can_manage(mode, interaction.user):
+            return await interaction.response.send_message(
+                "Only admins can manage inventory.", ephemeral=True
+            )
+        if inventory_source(doc) == "sheet":
+            return await interaction.response.send_message(READONLY_MSG, ephemeral=True)
+        view = ItemPickView(
+            doc.get("teams", []), self.team_id,
+            interaction.message, self.team_id, self.team_label,
+        )
+        await interaction.response.send_message(
+            "Add item to which team?", view=view, ephemeral=True
+        )
+
+    @discord.ui.button(label="Set Qty", style=discord.ButtonStyle.blurple, row=2)
+    async def set_qty(self, interaction: discord.Interaction, _b: discord.ui.Button):
+        if self.readonly:
+            return await interaction.response.send_message(READONLY_MSG, ephemeral=True)
+        await interaction.response.send_modal(
+            SetQtyModal(self.team_id, self.team_label, orig_msg=interaction.message)
+        )
+
+    @discord.ui.button(label="Remove", style=discord.ButtonStyle.red, row=2)
+    async def remove_item(self, interaction: discord.Interaction, _b: discord.ui.Button):
+        if self.readonly:
+            return await interaction.response.send_message(READONLY_MSG, ephemeral=True)
+        await interaction.response.send_modal(
+            RemoveItemModal(self.team_id, self.team_label, orig_msg=interaction.message)
+        )
 
 
 async def team_autocomplete(interaction: discord.Interaction, current: str):
@@ -329,49 +459,48 @@ async def refresh_inventory_msg(
         else:
             items = team_stock(doc, scope_id).get("items", [])
             title = f"Inventory — {scope_label}"
-        await msg.edit(
-            embed=inventory_embed(title, items),
-            view=InventoryView(scope_id, scope_label),
-        )
+        view = InvBrowseView(items, scope_id, scope_label, title)
+        await msg.edit(embed=view.render(), view=view)
     except Exception:
         pass  # original message deleted — ephemeral confirm still sent
 
 
-class InventoryView(discord.ui.View):
-    def __init__(self, team_id: str | None, team_label: str):
-        super().__init__(timeout=300)
-        self.team_id = team_id
-        self.team_label = team_label
+async def _sent_message(ctx: commands.Context, sent: object) -> discord.Message | None:
+    """Best-effort Message object for a just-sent reply (prefix and slash)."""
+    if isinstance(sent, discord.Message):
+        return sent
+    inter = getattr(ctx, "interaction", None)
+    if inter is not None:
+        try:
+            return await inter.original_response()
+        except Exception:
+            return None
+    return None
 
-    @discord.ui.button(label="+ Item", style=discord.ButtonStyle.green)
-    async def add_item(self, interaction: discord.Interaction, _b: discord.ui.Button):
-        doc = await get_guild_doc(interaction.guild_id)
-        mode = doc.get("settings", {}).get("inventory_mode", "everyone")
-        if not can_manage(mode, interaction.user):
-            return await interaction.response.send_message(
-                "Only admins can manage inventory.", ephemeral=True
-            )
-        if inventory_source(doc) == "sheet":
-            return await interaction.response.send_message(READONLY_MSG, ephemeral=True)
-        view = ItemPickView(
-            doc.get("teams", []), self.team_id,
-            interaction.message, self.team_id, self.team_label,
-        )
-        await interaction.response.send_message(
-            "Add item to which team?", view=view, ephemeral=True
-        )
 
-    @discord.ui.button(label="Set Qty", style=discord.ButtonStyle.blurple)
-    async def set_qty(self, interaction: discord.Interaction, _b: discord.ui.Button):
-        await interaction.response.send_modal(
-            SetQtyModal(self.team_id, self.team_label, orig_msg=interaction.message)
-        )
-
-    @discord.ui.button(label="Remove", style=discord.ButtonStyle.red)
-    async def remove_item(self, interaction: discord.Interaction, _b: discord.ui.Button):
-        await interaction.response.send_modal(
-            RemoveItemModal(self.team_id, self.team_label, orig_msg=interaction.message)
-        )
+async def _fill_sheet_view(
+    url: str, title: str, message: discord.Message, view: "InvBrowseView | None"
+) -> None:
+    """Background refresh: fetch the newest sheet, then update the message."""
+    try:
+        data = await asyncio.to_thread(fetch_sheet_items, url, True)
+    except Exception:
+        return
+    try:
+        if data.get("error"):
+            err = discord.Embed(title=title, colour=discord.Colour.teal())
+            err.description = data["error"]
+            err.set_footer(text="Read-only — managed in the linked Google Sheet.")
+            await message.edit(embed=err, view=None)
+            return
+        if view is None:
+            view = InvBrowseView(data["items"], None, "server", title, readonly=True)
+        else:
+            view.all_items = normalize_items(data["items"])
+            view.page = 0
+        await message.edit(embed=view.render(), view=view)
+    except Exception:
+        pass
 
 
 class Inventory(commands.Cog):
@@ -386,9 +515,22 @@ class Inventory(commands.Cog):
     async def inventory(self, ctx: commands.Context, team: str | None = None):
         doc = await get_guild_doc(ctx.guild.id)
         if inventory_source(doc) == "sheet":
-            data = await sheet_data(doc)
-            embed = sheet_embed(f"Inventory — {ctx.guild.name} (Google Sheet)", data)
-            await ctx.send(embed=embed)
+            # Instant feel: answer from the last collected version right away,
+            # then fetch the newest sheet in the background and update.
+            url = (doc.get("settings", {}).get("sheet_url") or "").strip()
+            title = f"Inventory — {ctx.guild.name} (Google Sheet)"
+            cached, age = peek_sheet(url)
+            if cached is None:
+                loading = discord.Embed(title=title, colour=discord.Colour.teal())
+                loading.description = "Fetching the sheet…"
+                msg = await _sent_message(ctx, await ctx.send(embed=loading))
+                if msg is not None:
+                    asyncio.create_task(_fill_sheet_view(url, title, msg, None))
+                return
+            view = InvBrowseView(cached["items"], None, "server", title, readonly=True)
+            msg = await _sent_message(ctx, await ctx.send(embed=view.render(), view=view))
+            if age is not None and age > SHEET_TTL and msg is not None:
+                asyncio.create_task(_fill_sheet_view(url, title, msg, view))
             return
         if team:
             team_id, team_name = resolve_team(doc, team)
@@ -401,21 +543,23 @@ class Inventory(commands.Cog):
                 if ctx.interaction:
                     return await ctx.interaction.response.send_message(msg, ephemeral=True)
                 return await ctx.send(msg)
-            stock = team_stock(doc, team_id)
-            embed = inventory_embed(f"Inventory — {team_name}", stock.get("items", []))
-            view = InventoryView(team_id, team_name)
+            view = InvBrowseView(
+                team_stock(doc, team_id).get("items", []),
+                team_id, team_name, f"Inventory — {team_name}",
+            )
         else:
-            items = combined_stock(doc)
-            embed = inventory_embed(f"Inventory — {ctx.guild.name} (combined)", items)
-            view = InventoryView(None, "server")
+            view = InvBrowseView(
+                combined_stock(doc), None, "server",
+                f"Inventory — {ctx.guild.name} (combined)",
+            )
         # hybrid: ctx.send works for both prefix and slash (deferred-safe)
         if not doc.get("teams"):
             await ctx.send(
                 "No teams yet — admins, add up to 3 on the website, then use !inv <team>.",
-                embed=embed, view=view,
+                embed=view.render(), view=view,
             )
         else:
-            await ctx.send(embed=embed, view=view)
+            await ctx.send(embed=view.render(), view=view)
 
     @commands.command(name="invdel")
     @commands.cooldown(30, 60.0, commands.BucketType.guild)
