@@ -11,13 +11,14 @@ export const POST: APIRoute = async ({ request, params }) => {
   const form = await request.formData();
   const finance_mode = String(form.get('finance_mode') ?? 'everyone');
   const inventory_mode = String(form.get('inventory_mode') ?? 'everyone');
+  const outreach_mode = String(form.get('outreach_mode') ?? 'everyone');
   const ok = (v: string) => (v === 'admins' ? 'admins' : 'everyone');
   let currency = String(form.get('currency') ?? '').trim();
   if (!currency || currency.length > 3) currency = '£';
   const c = await col();
   await c.updateOne(
     { _type: 'guild', guild_id: id },
-    { $set: { settings: { finance_mode: ok(finance_mode), inventory_mode: ok(inventory_mode), currency } } },
+    { $set: { settings: { finance_mode: ok(finance_mode), inventory_mode: ok(inventory_mode), outreach_mode: ok(outreach_mode), currency } } },
     { upsert: true },
   );
   const headers: Record<string, string> = { Location: `/guild/${id}?saved=1` };

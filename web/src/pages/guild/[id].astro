@@ -76,6 +76,11 @@ for (const [key, bucket] of Object.entries<any>(doc.inventory?.teams ?? {})) {
   if (!validBuckets.has(key)) continue;
   for (const it of (bucket.items ?? [])) invItems.push({ bucket: key, name: it.name, qty: Number(it.qty ?? 0), by: it.by ?? null });
 }
+const outItems: any[] = [];
+for (const [key, bucket] of Object.entries<any>(doc.outreach?.teams ?? {})) {
+  if (!validBuckets.has(key)) continue;
+  for (const it of (bucket.items ?? [])) outItems.push({ bucket: key, name: it.name, by: it.by ?? null });
+}
 ---
 <Layout title="Manage server" user={user}>
   <a class="back" href="/dashboard">← All servers</a>
@@ -232,6 +237,30 @@ for (const [key, bucket] of Object.entries<any>(doc.inventory?.teams ?? {})) {
   </section>
 
   <section class="section reveal">
+    <h2>Outreach list</h2>
+    <p class="desc">What each team has done. Log new entries from Discord with + Entry.</p>
+    {outItems.length === 0 ? (
+      <p class="empty">Nothing logged yet. Type <code class="cmd">!outreach</code> in Discord to get started.</p>
+    ) : (
+      <div class="row-list">
+        {outItems.map((it: any) => (
+          <div class="row-item">
+            <div class="meta">
+              <div class="title">{it.name}</div>
+              <div class="detail">{bucketLabel(it.bucket)}{it.by ? ` · added by ${it.by}` : ''}</div>
+            </div>
+            <form method="POST" action={`/api/guilds/${id}/outreach/delete`} onsubmit="return confirm('Delete this entry?')">
+              <input type="hidden" name="bucket" value={it.bucket} />
+              <input type="hidden" name="name" value={it.name} />
+              <button class="btn-danger" type="submit">Delete</button>
+            </form>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+
+  <section class="section reveal">
     <h2>Permissions &amp; currency</h2>
     <p class="desc">Who can add, change or remove finance and inventory entries — plus the currency symbol (£ by default).</p>
     <form class="form-card" method="POST" action={`/api/guilds/${id}/settings`}>
@@ -248,6 +277,13 @@ for (const [key, bucket] of Object.entries<any>(doc.inventory?.teams ?? {})) {
           <select name="inventory_mode">
             <option value="everyone" selected={settings.inventory_mode !== 'admins'}>Everyone</option>
             <option value="admins" selected={settings.inventory_mode === 'admins'}>Admins only</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Outreach</label>
+          <select name="outreach_mode">
+            <option value="everyone" selected={settings.outreach_mode !== 'admins'}>Everyone</option>
+            <option value="admins" selected={settings.outreach_mode === 'admins'}>Admins only</option>
           </select>
         </div>
         <div class="field" style="flex:0 1 140px">

@@ -40,6 +40,7 @@ class FTCManager(commands.Bot):
             "cogs.commands",
             "cogs.finance",
             "cogs.inventory",
+            "cogs.outreach",
         ):
             try:
                 await self.load_extension(ext)
@@ -90,7 +91,8 @@ class FTCManager(commands.Bot):
                         "**2. Check the balance** — `!bal` for the whole server, "
                         "`!bal myteam` per team (or `/balance`).\n"
                         "**3. Track stock** — `!inv` (or `/inventory`).\n"
-                        "**4. Custom replies** — `!addcmd hello Hi there`."
+                        "**4. Log outreach** — `!outreach` for what each team has done.\n"
+                        "**5. Custom replies** — `!addcmd hello Hi there`."
                     ),
                     colour=discord.Colour.blurple(),
                 )

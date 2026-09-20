@@ -1,13 +1,18 @@
-"""Mongo access with in-memory cache. Uses single DB `wilsodc`, collection `wilsodc`.
+"""Mongo access with a short-lived in-memory cache. DB `wilsodc`, collection `wilsodc`.
 
-Speed design:
-- Guild docs live in a process-wide dict after first read. Every command and
-  autocomplete hits memory, not the network.
-- Writes go through immediately to Mongo (the backup) AND update the cache,
-  so a restart never loses data.
-- A background task re-saves all cached docs every 60s as a second safety net.
-- Per-guild asyncio locks prevent concurrent writes racing each other.
-- Compound index on (_type, guild_id) keeps the first read fast.
+Design (every data-loss path closed):
+- Reads hit memory and refresh from Mongo at most every CACHE_TTL seconds,
+  so displays are never more than a few seconds stale and message-heavy paths
+  (custom-command fallback, autocomplete) stay fast.
+- Writes ALWAYS go straight to Mongo (write-through). There is deliberately
+  NO background writer: a periodic full-doc rewrite is exactly what used to
+  silently undo website changes with a stale snapshot.
+- Saves merge: bot-owned sections (finance/inventory/commands) come from the
+  bot's copy; website-owned sections (teams/settings) are preserved from the
+  database, so a stale copy can never wipe website changes.
+- Handlers that mutate data use get_fresh_guild_doc (bypass cache).
+- Per-guild asyncio locks serialize concurrent access.
+- Compound (+unique) index on (_type, guild_id); inserts tolerate races.
 
 Document shapes:
   {_type: "guild", guild_id: str, teams: [{id, name, aliases[]}],
@@ -25,13 +30,14 @@ import time
 import uuid
 
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import DuplicateKeyError
 
 _client: AsyncIOMotorClient | None = None
 
 _cache: dict[str, dict] = {}
+_cache_at: dict[str, float] = {}
+CACHE_TTL = 10.0
 _locks: dict[str, asyncio.Lock] = {}
-_flush_started = False
-FLUSH_INTERVAL = 60
 
 _last_write: dict[str, float] = {}
 MIN_WRITE_GAP = 1.5
@@ -88,13 +94,28 @@ def _lock_for(gid: str) -> asyncio.Lock:
     return lock
 
 
+def _cache_store(gid: str, doc: dict) -> dict:
+    _cache[gid] = doc
+    _cache_at[gid] = time.monotonic()
+    return doc
+
+
+def _cache_fresh(gid: str) -> dict | None:
+    doc = _cache.get(gid)
+    if doc is not None and time.monotonic() - _cache_at.get(gid, 0) < CACHE_TTL:
+        return doc
+    return None
+
+
 def _defaults(doc: dict) -> dict:
     doc.setdefault("teams", [])
     doc.setdefault("settings", {}).setdefault("finance_mode", "everyone")
     doc["settings"].setdefault("inventory_mode", "everyone")
+    doc["settings"].setdefault("outreach_mode", "everyone")
     doc["settings"].setdefault("currency", "£")
     doc.setdefault("finance", {}).setdefault("teams", {})
     doc.setdefault("inventory", {}).setdefault("teams", {})
+    doc.setdefault("outreach", {}).setdefault("teams", {})
     doc.setdefault("commands", [])
     return doc
 
@@ -104,13 +125,13 @@ def new_id() -> str:
 
 
 async def get_guild_doc(guild_id: int | str) -> dict:
-    """Fast path: memory hit. Slow path (once per guild per restart): one indexed read."""
+    """Memory hit when fresh (< CACHE_TTL old), else one indexed re-read."""
     gid = str(guild_id)
-    doc = _cache.get(gid)
+    doc = _cache_fresh(gid)
     if doc is not None:
         return doc
     async with _lock_for(gid):
-        doc = _cache.get(gid)
+        doc = _cache_fresh(gid)
         if doc is not None:
             return doc
         col = get_collection()
@@ -125,9 +146,12 @@ async def get_guild_doc(guild_id: int | str) -> dict:
                 "inventory": {"teams": {}},
                 "commands": [],
             }
-            await col.insert_one(doc)
-        _cache[gid] = _defaults(doc)
-        return _cache[gid]
+            try:
+                await col.insert_one(doc)
+            except DuplicateKeyError:
+                # Lost an insert race: someone else created it first.
+                doc = await col.find_one({"_type": "guild", "guild_id": gid}) or doc
+        return _cache_store(gid, _defaults(doc))
 
 
 # Sections the bot owns. On save, these come from the bot's copy; everything
@@ -150,7 +174,7 @@ async def save_guild_doc(doc: dict) -> None:
                 if key in doc:
                     fresh[key] = doc[key]
         _defaults(fresh)
-        _cache[gid] = fresh
+        _cache_store(gid, fresh)
         await col.replace_one({"_id": fresh["_id"]}, fresh, upsert=True)
 
 
@@ -172,9 +196,11 @@ async def get_fresh_guild_doc(guild_id: int | str) -> dict:
                 "inventory": {"teams": {}},
                 "commands": [],
             }
-            await col.insert_one(doc)
-        _cache[gid] = _defaults(doc)
-        return _cache[gid]
+            try:
+                await col.insert_one(doc)
+            except DuplicateKeyError:
+                doc = await col.find_one({"_type": "guild", "guild_id": gid}) or doc
+        return _cache_store(gid, _defaults(doc))
 
 
 async def get_global_commands() -> dict:
@@ -191,28 +217,11 @@ async def get_global_commands() -> dict:
     return _globals_cache
 
 
-async def _flush_loop() -> None:
-    while True:
-        await asyncio.sleep(FLUSH_INTERVAL)
-        try:
-            # Route through save_guild_doc so the merge runs: website-owned
-            # teams/settings are preserved even if this cache copy is stale.
-            for doc in list(_cache.values()):
-                try:
-                    await save_guild_doc(doc)
-                except Exception as exc:
-                    print(f"[mongo] backup flush failed: {exc}")
-        except Exception as exc:
-            print(f"[mongo] backup flush failed: {exc}")
-
-
 def start_flush_loop() -> None:
-    global _flush_started
-    if _flush_started:
-        return
-    _flush_started = True
-    asyncio.get_running_loop().create_task(_flush_loop())
-    print(f"[mongo] cache on, merge-save v2 active, DB backup flush every {FLUSH_INTERVAL}s")
+    # Retired: every mutation already writes straight through to Mongo, so a
+    # periodic full-doc rewrite is pure risk (it once undid website changes
+    # with a stale snapshot). Kept as a no-op so older entrypoints still boot.
+    print("[mongo] cache TTL 10s, merge-save v3 active, no background writer")
 
 
 def suggest_team(doc: dict, query: str | None) -> str | None:

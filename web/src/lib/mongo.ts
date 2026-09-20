@@ -23,7 +23,16 @@ export async function getGuild(guildId: string) {
       settings: { finance_mode: 'everyone', inventory_mode: 'everyone' },
       finance: { teams: {} }, inventory: { teams: {} }, commands: [],
     };
-    await c.insertOne(doc);
+    try {
+      await c.insertOne(doc);
+    } catch (err: any) {
+      // Lost an insert race (bot created it first): re-read instead of crashing.
+      if (err?.code === 11000) {
+        doc = await c.findOne({ _type: 'guild', guild_id: String(guildId) });
+      } else {
+        throw err;
+      }
+    }
   }
   return doc;
 }

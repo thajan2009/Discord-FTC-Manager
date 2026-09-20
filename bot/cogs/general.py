@@ -52,6 +52,11 @@ class General(commands.Cog):
             inline=False,
         )
         embed.add_field(
+            name="Outreach list (prefix + slash)",
+            value="`!outreach [team]` / `/outreach [team]` — log what each team has done.",
+            inline=False,
+        )
+        embed.add_field(
             name="Custom commands (prefix only)",
             value="`!addcmd <name> <response>`\n`!delcmd <name>`\n`!cmds`",
             inline=False,
