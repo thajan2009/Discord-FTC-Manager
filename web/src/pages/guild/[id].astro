@@ -161,7 +161,7 @@ if (invSource === 'sheet') {
     <form class="form-card" method="POST" action={`/api/guilds/${id}/commands`} onsubmit="this.querySelector('button').disabled = true">
       <div class="form-row">
         <div class="field"><label>Trigger (one word)</label><input name="trigger" placeholder="practice" required /></div>
-        <div class="field"><label>Response</label><input name="response" placeholder="Practice is Tuesdays at 6pm" required /></div>
+        <div class="field" style="flex:2 1 260px"><label>Response (multi-line OK — Enter for new lines)</label><textarea name="response" rows="3" placeholder={'Practice is Tuesdays at 6pm\nBring your robot'} required></textarea></div>
         <div><button class="btn btn-small" type="submit">Add</button></div>
       </div>
     </form>

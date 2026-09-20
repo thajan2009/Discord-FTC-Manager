@@ -182,7 +182,7 @@ class InvBrowseView(discord.ui.View):
         else:
             lines = []
             for it in chunk:
-                name = f"~~{it['name']}~~" if it["qty"] <= 0 else it["name"]
+                name = f"**~~{it['name']}~~**" if it["qty"] <= 0 else f"**{it['name']}**"
                 lines.append(f"{name} - {it['qty']}")
                 bits = [b for b in (it["vendor"], it["category"]) if b]
                 if bits:

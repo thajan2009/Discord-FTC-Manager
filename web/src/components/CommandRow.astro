@@ -8,7 +8,7 @@ const { guildId, cmd } = Astro.props;
 <div class="row-item">
   <div class="meta">
     <div class="title"><code class="cmd">!{cmd.trigger}</code></div>
-    <div class="detail">{cmd.response}</div>
+    <div class="detail" style="white-space:pre-line">{cmd.response}</div>
   </div>
   <form method="POST" action={`/api/guilds/${guildId}/commands/delete`} onsubmit="return confirm('Delete this command?')">
     <input type="hidden" name="trigger" value={cmd.trigger} />

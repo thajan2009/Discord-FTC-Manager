@@ -308,12 +308,14 @@ code.cmd {
 .form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
 .field { display: flex; flex-direction: column; gap: 6px; flex: 1 1 180px; }
 .field label { font-size: 0.82rem; color: var(--muted); font-weight: 600; }
-input, select {
+input, select, textarea {
   background: rgba(0, 0, 0, 0.55); border: 1px solid var(--card-border); color: var(--text);
   border-radius: 10px; padding: 10px 12px; font-size: 0.95rem; width: 100%;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  font-family: inherit;
 }
-input:focus, select:focus { outline: none; border-color: var(--accent-3); box-shadow: 0 0 0 3px rgba(47, 123, 255, 0.3); }
+textarea { resize: vertical; min-height: 76px; line-height: 1.5; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-3); box-shadow: 0 0 0 3px rgba(47, 123, 255, 0.3); }
 
 .notice {
   background: rgba(47, 123, 255, 0.1); border: 1px solid rgba(47, 123, 255, 0.45);
