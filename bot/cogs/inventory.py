@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from db.mongo import claim_write_slot, get_fresh_guild_doc, get_guild_doc, resolve_team, save_guild_doc, suggest_team
 from utils.perms import can_manage
+from utils.branding import brand
 from utils.sheets import CACHE_TTL as SHEET_TTL
 from utils.sheets import fetch_sheet_items, peek_sheet
 
@@ -62,15 +63,23 @@ def find_item(items: list, name: str) -> dict | None:
 
 
 PAGE_SIZE = 10
-SORT_CHOICES = [
+BASE_SORTS = [
     ("name", "Name (A-Z)"),
     ("qty_desc", "Stock (high first)"),
     ("qty_asc", "Stock (low first)"),
-    ("vendor", "Vendor"),
-    ("category", "Category"),
 ]
-SORT_PRIORITY = ["category", "vendor", "name", "qty_desc", "qty_asc"]
-SORT_LABELS = dict(SORT_CHOICES)
+BASE_PRIORITY = ["name", "qty_desc", "qty_asc"]
+MAX_SELECT_OPTIONS = 25
+
+
+def tag_options(items: list) -> list:
+    """One dropdown entry per vendor/category value in the data, so you can
+    sort by tags like goBILDA or Structure Parts."""
+    vendors = sorted({i["vendor"] for i in items if i["vendor"]}, key=str.lower)
+    cats = sorted({i["category"] for i in items if i["category"]}, key=str.lower)
+    opts = [(f"vendor:{v}", f"Vendor: {v}"[:100]) for v in vendors]
+    opts += [(f"category:{c}", f"Category: {c}"[:100]) for c in cats]
+    return opts
 
 
 def normalize_items(items: list) -> list:
@@ -90,23 +99,22 @@ def normalize_items(items: list) -> list:
 
 
 class InvSortSelect(discord.ui.Select):
-    """Multi-select sort: pick several keys for finer sorting."""
+    """Multi-select: base sorts plus one entry per vendor/category tag."""
 
-    def __init__(self, available: set, current: list):
-        options = [
-            discord.SelectOption(label=label, value=key, default=(key in current))
-            for key, label in SORT_CHOICES
-            if key in available
-        ]
+    def __init__(self, options: list, current: list):
         super().__init__(
             placeholder="Sort by… (pick several)",
-            options=options,
+            options=[
+                discord.SelectOption(label=label, value=key, default=(key in current))
+                for key, label in options
+            ],
             min_values=1,
             max_values=len(options),
         )
 
     async def callback(self, interaction: discord.Interaction):
-        self.view.sort = [k for k in SORT_PRIORITY if k in self.values] or ["name"]
+        order = [k for k, _ in self.view.all_options]
+        self.view.sort = [k for k in order if k in self.values] or ["name"]
         self.view.page = 0
         await interaction.response.edit_message(embed=self.view.render(), view=self.view)
 
@@ -124,36 +132,44 @@ class InvBrowseView(discord.ui.View):
         self.readonly = readonly
         self.sort = ["name"]
         self.page = 0
-        available = {"name", "qty_desc", "qty_asc"}
-        if any(i["vendor"] for i in self.all_items):
-            available.add("vendor")
-        if any(i["category"] for i in self.all_items):
-            available.add("category")
+        self.all_options = (BASE_SORTS + tag_options(self.all_items))[:MAX_SELECT_OPTIONS]
+        self.opt_labels = dict(self.all_options)
         # NOTE: must use the unbound View.add_item — self.add_item is the
         # "+ Item" Button attribute shadowing it (decorator quirk).
-        discord.ui.View.add_item(self, InvSortSelect(available, self.sort))
+        discord.ui.View.add_item(self, InvSortSelect(self.all_options, self.sort))
         if readonly:
             # Hide management buttons outright (same shadowing reason).
             for btn in (self.add_item, self.set_qty, self.remove_item):
                 discord.ui.View.remove_item(self, btn)
 
+    def _tags_of(self, item: dict) -> set:
+        tags = set()
+        if item["vendor"]:
+            tags.add(f"vendor:{item['vendor']}")
+        if item["category"]:
+            tags.add(f"category:{item['category']}")
+        return tags
+
     def ordered(self) -> list:
         items = list(self.all_items)
-        for key in reversed(SORT_PRIORITY):
-            if key not in self.sort:
-                continue
-            if key == "name":
-                items.sort(key=lambda x: x["name"].lower())
-            elif key == "vendor":
-                # Blanks sink to the bottom.
-                items.sort(key=lambda x: (x["vendor"] == "", x["vendor"].lower()))
-            elif key == "category":
-                items.sort(key=lambda x: (x["category"] == "", x["category"].lower()))
-            elif key == "qty_desc":
-                items.sort(key=lambda x: -x["qty"])
-            elif key == "qty_asc":
-                items.sort(key=lambda x: x["qty"])
-        return items
+        tags = [k for k in self.sort if k.startswith(("vendor:", "category:"))]
+        base = [k for k in BASE_PRIORITY if k in self.sort] or ["name"]
+
+        def apply(seq: list) -> list:
+            for key in reversed(base):
+                if key == "name":
+                    seq.sort(key=lambda x: x["name"].lower())
+                elif key == "qty_desc":
+                    seq.sort(key=lambda x: -x["qty"])
+                elif key == "qty_asc":
+                    seq.sort(key=lambda x: x["qty"])
+            return seq
+
+        if not tags:
+            return apply(items)
+        picked = set(tags)
+        return apply([i for i in items if self._tags_of(i) & picked]) + \
+            apply([i for i in items if not self._tags_of(i) & picked])
 
     def render(self) -> discord.Embed:
         items = self.ordered()
@@ -164,17 +180,16 @@ class InvBrowseView(discord.ui.View):
         if not chunk:
             e.description = "Nothing here yet — press + Item." if not self.readonly else "The linked sheet has no items."
         else:
-            width = min(26, max(len(it["name"]) for it in chunk))
-            table = []
+            lines = []
             for it in chunk:
-                name = it["name"] if len(it["name"]) <= width else it["name"][:width - 1] + "…"
-                row = f"{name.ljust(width)}  x {it['qty']}"
+                name = f"~~{it['name']}~~" if it["qty"] <= 0 else it["name"]
+                lines.append(f"{name} - {it['qty']}")
                 bits = [b for b in (it["vendor"], it["category"]) if b]
                 if bits:
-                    row += "  ·  " + "  /  ".join(bits)
-                table.append(row)
-            e.description = "```\n" + "\n".join(table) + "\n```"
-        sort_names = ", ".join(SORT_LABELS[k] for k in self.sort)
+                    lines.append(" · ".join(bits))
+            e.description = "\n".join(lines)
+        brand(e, "FTCManager Inventory")
+        sort_names = ", ".join(self.opt_labels.get(k, k) for k in self.sort)
         if self.readonly:
             e.set_footer(text=f"Page {self.page + 1}/{total} · Sorted: {sort_names} · Read-only — managed in the linked Google Sheet.")
         else:

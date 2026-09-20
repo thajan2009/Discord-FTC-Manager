@@ -5,6 +5,8 @@ import os
 import discord
 from discord.ext import commands
 
+from utils.branding import brand
+
 
 class General(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -35,6 +37,7 @@ class General(commands.Cog):
         embed.add_field(name="Latency", value=f"{ms}ms")
         embed.add_field(name="Servers", value=str(len(self.bot.guilds)))
         embed.add_field(name="Cached servers", value=str(len(mongo_db._cache)))
+        brand(embed, "FTCManager")
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="help", description="Show help.")
@@ -77,6 +80,7 @@ class General(commands.Cog):
             inline=False,
         )
         embed.set_footer(text="Fair use: 30 commands per minute per server keeps things smooth for everyone.")
+        brand(embed, "FTCManager")
         await ctx.send(embed=embed)
 
 

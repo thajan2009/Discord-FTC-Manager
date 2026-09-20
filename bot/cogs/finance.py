@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from db.mongo import claim_write_slot, get_fresh_guild_doc, get_guild_doc, resolve_team, save_guild_doc, suggest_team
 from utils.money import clean_symbol, format_money, parse_amount_to_pence
+from utils.branding import brand
 from utils.perms import can_manage
 
 
@@ -76,6 +77,7 @@ def finance_embed(title: str, bucket: dict, symbol: str = "£") -> discord.Embed
         e.add_field(name="Sources / Sponsors", value="None yet — press + Source.", inline=False)
     e.add_field(name="Net cashflow", value=f"**{format_money(net, symbol)}**", inline=False)
     e.set_footer(text="Type names exactly to remove (!findel <exact name>). Use buttons to add.")
+    brand(e, "FTCManager Finance")
     return e
 
 

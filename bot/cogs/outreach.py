@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 from db.mongo import get_fresh_guild_doc, get_guild_doc, resolve_team, save_guild_doc, suggest_team
 from utils.perms import can_manage
+from utils.branding import brand
 
 
 def team_outreach(doc: dict, team_id: str | None) -> dict:
@@ -56,6 +57,7 @@ def outreach_embed(title: str, entries: list) -> discord.Embed:
             lines.append(f"+{len(entries) - 30} more — check a single team.")
         e.description = "\n".join(lines)
     e.set_footer(text="Type names exactly as shown to remove them.")
+    brand(e, "FTCManager Outreach")
     return e
 
 
