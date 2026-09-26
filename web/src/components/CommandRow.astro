@@ -1,17 +1,23 @@
 ---
 interface Props {
   guildId: string;
-  cmd: { trigger: string; response: string };
+  cmd: { trigger: string; response: string; in_ftchelp?: boolean };
 }
 const { guildId, cmd } = Astro.props;
 ---
 <div class="row-item">
   <div class="meta">
-    <div class="title"><code class="cmd">!{cmd.trigger}</code></div>
+    <div class="title"><code class="cmd">!{cmd.trigger}</code>{cmd.in_ftchelp ? <span class="chip">in !ftchelp</span> : null}</div>
     <div class="detail" style="white-space:pre-line">{cmd.response}</div>
   </div>
-  <form method="POST" action={`/api/guilds/${guildId}/commands/delete`} onsubmit="return confirm('Delete this command?')">
-    <input type="hidden" name="trigger" value={cmd.trigger} />
-    <button class="btn-danger" type="submit">Delete</button>
-  </form>
+  <div style="display:flex;gap:8px;align-items:center">
+    <form method="POST" action={`/api/guilds/${guildId}/commands/ftchelp`}>
+      <input type="hidden" name="trigger" value={cmd.trigger} />
+      <button class="btn-ghost btn-small" type="submit">{cmd.in_ftchelp ? 'Remove from !ftchelp' : 'Add to !ftchelp'}</button>
+    </form>
+    <form method="POST" action={`/api/guilds/${guildId}/commands/delete`} onsubmit="return confirm('Delete this command?')">
+      <input type="hidden" name="trigger" value={cmd.trigger} />
+      <button class="btn-danger" type="submit">Delete</button>
+    </form>
+  </div>
 </div>

@@ -1,7 +1,8 @@
 """Custom commands — PREFIX ONLY (no slash equivalents, per request).
 
-- Guild commands: !addcmd / !delcmd / !cmds (admins only to manage)
-- FTC help directory: bot/data/ftchelp.py — owner-edited dict, browsed with !ftchelp
+- Guild commands: !addcmd / !delcmd / !cmds / !ftctoggle (admins only to manage)
+- FTC help directory: bot/data/ftchelp.py plus guild commands flagged
+  "Add to !ftchelp" — browsed with !ftchelp
 - Global commands: dict in {_type: global_commands} doc, editable via web UI / code
 - Triggers fire via on_message fallback: !<trigger>
 Guild trigger wins, then FTC directory, then global trigger.
@@ -17,8 +18,21 @@ from utils.perms import is_admin
 FTCHELP_PER_PAGE = 10
 
 
-def ftchelp_embed(page: int) -> discord.Embed:
-    names = sorted(FTCHELP)
+def ftchelp_names(doc: dict | None) -> tuple[list, int]:
+    """Merged sorted triggers: owner directory + flagged guild commands.
+    Returns (names, server_count)."""
+    names = set(FTCHELP)
+    server_count = 0
+    if doc:
+        for c in doc.get("commands", []):
+            if c.get("in_ftchelp") and c.get("trigger"):
+                if c["trigger"] not in names:
+                    server_count += 1
+                names.add(c["trigger"])
+    return sorted(names), server_count
+
+
+def ftchelp_embed(page: int, names: list, server_count: int = 0) -> discord.Embed:
     total_pages = max(1, (len(names) + FTCHELP_PER_PAGE - 1) // FTCHELP_PER_PAGE)
     page = min(max(1, page), total_pages)
     chunk = names[(page - 1) * FTCHELP_PER_PAGE:page * FTCHELP_PER_PAGE]
@@ -27,17 +41,22 @@ def ftchelp_embed(page: int) -> discord.Embed:
         e.description = "Nothing here yet — the owner adds entries in bot/data/ftchelp.py."
     else:
         e.description = "\n".join(f"`!{t}`" for t in chunk)
-    e.set_footer(text="Type any command above to see it. !ftchelp <page> jumps pages.")
+    footer = "Type any command above to see it. !ftchelp <page> jumps pages."
+    if server_count:
+        footer += f" Includes {server_count} from this server."
+    e.set_footer(text=footer)
     return e, total_pages
 
 
 class FtchelpView(discord.ui.View):
-    def __init__(self, page: int, total_pages: int):
+    def __init__(self, page: int, names: list, server_count: int = 0):
         super().__init__(timeout=180)
         self.page = page
-        self.total_pages = total_pages
+        self.names = names
+        self.server_count = server_count
+        self.total_pages = max(1, (len(names) + FTCHELP_PER_PAGE - 1) // FTCHELP_PER_PAGE)
         self._prev.disabled = page <= 1
-        self._next.disabled = page >= total_pages
+        self._next.disabled = page >= self.total_pages
 
     @discord.ui.button(label="Prev", style=discord.ButtonStyle.grey)
     async def _prev(self, interaction: discord.Interaction, _b: discord.ui.Button):
@@ -50,7 +69,7 @@ class FtchelpView(discord.ui.View):
         await self._refresh(interaction)
 
     async def _refresh(self, interaction: discord.Interaction):
-        embed, total = ftchelp_embed(self.page)
+        embed, total = ftchelp_embed(self.page, self.names, self.server_count)
         self._prev.disabled = self.page <= 1
         self._next.disabled = self.page >= total
         await interaction.response.edit_message(embed=embed, view=self)
@@ -96,28 +115,51 @@ class CustomCommands(commands.Cog):
     @commands.guild_only()
     async def cmds(self, ctx: commands.Context):
         doc = await get_guild_doc(ctx.guild.id)
-        guild_cmds = [c.get("trigger") for c in doc.get("commands", [])]
+        guild_cmds = doc.get("commands", [])
         global_cmds = await get_global_commands()
         lines = []
         if guild_cmds:
-            lines.append("**Server:** " + ", ".join(f"`!{t}`" for t in sorted(guild_cmds)))
+            lines.append("**Server:** " + ", ".join(
+                f"`!{c.get('trigger')}`" + (" ★" if c.get("in_ftchelp") else "")
+                for c in sorted(guild_cmds, key=lambda c: c.get("trigger", ""))
+            ))
         if global_cmds:
             lines.append("**Global:** " + ", ".join(f"`!{t}`" for t in sorted(global_cmds)))
-        lines.append("**FTC help directory:** type `!ftchelp` to browse it.")
+        lines.append("**FTC help directory:** type `!ftchelp` to browse it. (★ = also listed there)")
         await ctx.send("\n".join(lines))
+
+    @commands.command(name="ftctoggle")
+    @commands.cooldown(30, 60.0, commands.BucketType.guild)
+    @commands.guild_only()
+    async def ftctoggle(self, ctx: commands.Context, trigger: str):
+        """!ftctoggle <command> — toggle whether a server command appears in !ftchelp."""
+        if not is_admin(ctx.author):
+            return await ctx.send("Only server admins can change this.")
+        trigger = trigger.lower().lstrip("!")
+        doc = await get_fresh_guild_doc(ctx.guild.id)
+        for c in doc.get("commands", []):
+            if c.get("trigger") == trigger:
+                c["in_ftchelp"] = not c.get("in_ftchelp", False)
+                await save_guild_doc(doc)
+                state = "now listed in `!ftchelp`" if c["in_ftchelp"] else "no longer listed in `!ftchelp`"
+                return await ctx.send(f"`!{trigger}` is {state}.")
+        await ctx.send(f"No server command `!{trigger}`. (Owner directory entries can't be toggled.)")
 
     @commands.command(name="ftchelp")
     @commands.cooldown(30, 60.0, commands.BucketType.guild)
     @commands.guild_only()
     async def ftchelp(self, ctx: commands.Context, page: str = "1"):
-        """!ftchelp [page] — browse the owner-curated FTC help directory."""
+        """!ftchelp [page] — browse the FTC help directory + flagged server commands."""
         try:
             page = int(page)
         except (TypeError, ValueError):
             page = 1
-        embed, total = ftchelp_embed(page)
+        doc = await get_guild_doc(ctx.guild.id)
+        names, server_count = ftchelp_names(doc)
+        total = max(1, (len(names) + FTCHELP_PER_PAGE - 1) // FTCHELP_PER_PAGE)
         page = min(max(1, page), total)
-        await ctx.send(embed=embed, view=FtchelpView(page, total))
+        embed, total = ftchelp_embed(page, names, server_count)
+        await ctx.send(embed=embed, view=FtchelpView(page, names, server_count))
 
     @commands.Cog.listener("on_message")
     async def custom_fallback(self, event_msg: discord.Message):

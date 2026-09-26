@@ -33,7 +33,7 @@
 
 ## 5. Command map (final)
 - Hybrid (both): `!bal|!balance|!finance` ↔ `/balance [team]`, `!inv|!inventory` ↔ `/inventory [team]`, `!outreach|!out|!outreachlist` ↔ `/outreach [team]`, `!ping`↔`/ping`, `!help`↔`/help`, `!status`↔`/status`, `!manage`↔`/manage` (posts `{PUBLIC_WEB_URL}/guild/<server id>`), plus `!findel <exact name>`, `!invdel <exact name>`, `!outdel <exact name>`.
-- Prefix-only (no slash): `!addcmd`, `!delcmd`, `!cmds`, `!ftchelp [page]`, FTC directory triggers (e.g. `!axon`), and all custom `!triggers`.
+- Prefix-only (no slash): `!addcmd`, `!delcmd`, `!cmds`, `!ftctoggle <command>` (puts a server command into `!ftchelp`), `!ftchelp [page]`, FTC directory triggers (e.g. `!axon`), and all custom `!triggers`.
 - No IDs anywhere: embeds show plain names; removal matches names exactly (case-insensitive).
 - FTC directory lives in `bot/data/ftchelp.py` — one `"trigger": "response"` line per entry, restart bot to apply. Server `!addcmd` overrides it per server.
 

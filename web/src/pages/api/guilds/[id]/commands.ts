@@ -19,6 +19,7 @@ export const POST: APIRoute = async ({ request, params }) => {
   const form = await request.formData();
   const trigger = String(form.get('trigger') ?? '').trim().toLowerCase().replace(/^!/, '');
   const response = String(form.get('response') ?? '').trim();
+  const in_ftchelp = String(form.get('in_ftchelp') ?? '') === 'on';
   if (!trigger || !response) return back(id, gate.ok.refreshed, 'command-required');
   if (/\s/.test(trigger)) return back(id, gate.ok.refreshed, 'trigger-spaces');
   const c = await col();
@@ -26,7 +27,7 @@ export const POST: APIRoute = async ({ request, params }) => {
   await c.updateOne({ _type: 'guild', guild_id: id }, { $pull: { commands: { trigger } } as any });
   await c.updateOne(
     { _type: 'guild', guild_id: id },
-    { $push: { commands: { trigger, response } } as any },
+    { $push: { commands: { trigger, response, in_ftchelp } } as any },
     { upsert: true },
   );
   return back(id, gate.ok.refreshed);

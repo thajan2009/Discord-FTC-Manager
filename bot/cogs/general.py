@@ -66,7 +66,7 @@ class General(commands.Cog):
         )
         embed.add_field(
             name="FTC help directory (prefix only)",
-            value="`!ftchelp [page]` — browse owner-curated answers like `!axon`.",
+            value="`!ftchelp [page]` — browse answers like `!axon`.\nAdmins: `!ftctoggle <command>` lists a server command there too.",
             inline=False,
         )
         embed.add_field(
