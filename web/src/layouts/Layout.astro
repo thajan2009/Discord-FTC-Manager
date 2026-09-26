@@ -82,13 +82,111 @@ const { title, user = null } = Astro.props;
           els.forEach((el) => el.classList.add('visible'));
         }
       };
-      // Branded loading screen during SPA-style page swaps.
-      const showLoader = () => document.getElementById('loader')?.classList.add('on');
-      const hideLoader = () => document.getElementById('loader')?.classList.remove('on');
+      // Branded loading screen — only if a swap actually takes a while.
+      let loaderTimer = null;
+      const showLoader = () => {
+        clearTimeout(loaderTimer);
+        loaderTimer = setTimeout(() => document.getElementById('loader')?.classList.add('on'), 350);
+      };
+      const hideLoader = () => {
+        clearTimeout(loaderTimer);
+        document.getElementById('loader')?.classList.remove('on');
+      };
       document.addEventListener('astro:before-preparation', showLoader);
       document.addEventListener('astro:after-swap', () => { hideLoader(); initReveal(); });
       document.addEventListener('astro:page-load', () => { hideLoader(); initReveal(); });
       initReveal();
+
+      // Background form saves: every dashboard POST goes via fetch — no page
+      // wait screen. Success quietly refreshes the content; errors pop a toast.
+      const FORM_ERRORS = {
+        'max-teams': 'Team limit reached (3). Delete one to add another.',
+        'name-required': 'A name is required.',
+        'name-taken': 'That name is already used.',
+        'alias-taken': 'One of those aliases is already used.',
+        'command-required': 'Both a trigger and a response are required.',
+        'trigger-spaces': 'Trigger must be one word (no spaces).',
+        'bad-amount': 'Amount must be a number like 25 or 25.50.',
+        'bad-qty': 'Quantity must be a whole number (0 or more).',
+        'bad-sheet-url': 'That Google Sheets link looks wrong — paste the full share URL.',
+        missing: 'Something was missing — please try again.',
+      };
+      const toast = (msg, kind) => {
+        let box = document.getElementById('toasts');
+        if (!box) {
+          box = document.createElement('div');
+          box.id = 'toasts';
+          document.body.appendChild(box);
+        }
+        const el = document.createElement('div');
+        el.className = 'toast' + (kind === 'error' ? ' toast-error' : '');
+        el.textContent = msg;
+        box.appendChild(el);
+        requestAnimationFrame(() => el.classList.add('show'));
+        setTimeout(() => {
+          el.classList.remove('show');
+          setTimeout(() => el.remove(), 350);
+        }, 4200);
+      };
+      const refreshMain = async () => {
+        const res = await fetch(window.location.pathname, { headers: { 'X-Requested-With': 'fetch' } });
+        if (!res.ok) throw new Error('reload failed');
+        const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+        const fresh = doc.querySelector('main');
+        const cur = document.querySelector('main');
+        if (!fresh || !cur) throw new Error('reload failed');
+        cur.innerHTML = fresh.innerHTML;
+        cur.querySelectorAll('.reveal').forEach((el) => el.classList.add('visible'));
+      };
+      document.addEventListener('submit', async (ev) => {
+        const form = ev.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        if ((form.method || '').toLowerCase() !== 'post') return;
+        if (!form.action.includes('/api/guilds/')) return;
+        ev.preventDefault();
+        const btn = form.querySelector('button[type="submit"]');
+        const orig = btn ? btn.innerHTML : '';
+        if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
+        const done = () => { if (btn) { btn.disabled = false; btn.innerHTML = orig; } };
+        let res;
+        try {
+          res = await fetch(form.action, { method: 'POST', body: new FormData(form), redirect: 'manual' });
+        } catch {
+          toast('Network error — check your connection and retry.', 'error');
+          done();
+          return;
+        }
+        if (res.type === 'opaqueredirect') { window.location.reload(); return; }
+        const loc = res.headers.get('Location') || '';
+        if ((res.status === 301 || res.status === 302) && loc.startsWith('/api/auth/')) {
+          window.location.href = loc;
+          return;
+        }
+        if (res.status === 403) {
+          toast('Not allowed anymore — refresh the page and retry.', 'error');
+          done();
+          return;
+        }
+        if (res.status === 301 || res.status === 302) {
+          const err = new URLSearchParams((loc.split('?')[1] || '')).get('error');
+          if (err) {
+            toast(FORM_ERRORS[err] || 'Something went wrong.', 'error');
+            done();
+            return;
+          }
+          try {
+            await refreshMain();
+            toast('Saved.', 'ok');
+          } catch {
+            window.location.reload();
+            return;
+          }
+          done();
+          return;
+        }
+        toast('Unexpected response — try again.', 'error');
+        done();
+      });
     }
   </script>
 </body>

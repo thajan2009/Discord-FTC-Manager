@@ -343,6 +343,22 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .server-card .go { margin-left: auto; color: var(--muted); font-size: 1.3rem; transition: transform 0.2s ease; }
 .server-card:hover .go { transform: translateX(4px); color: #fff; }
 
+/* ---------- toast popups ---------- */
+#toasts {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  z-index: 120; display: flex; flex-direction: column; gap: 10px; align-items: center;
+  width: min(480px, calc(100vw - 40px));
+}
+.toast {
+  background: rgba(18, 20, 28, 0.95); border: 1px solid rgba(87, 242, 135, 0.5);
+  color: var(--text); border-radius: 12px; padding: 12px 20px; font-size: 0.92rem;
+  font-weight: 600; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  opacity: 0; transform: translateY(12px); transition: opacity 0.3s ease, transform 0.3s ease;
+  text-align: center; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-error { border-color: rgba(237, 66, 69, 0.65); }
+
 /* ---------- branded loading screen ---------- */
 .loader {
   position: fixed; inset: 0; z-index: 100;
