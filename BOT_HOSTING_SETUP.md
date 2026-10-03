@@ -16,7 +16,8 @@
 3. Panel → Files → Upload zip → Unarchive → move to root, delete zip.
 4. Panel → Startup → Entry File = `main.py`. Do NOT run pip in console — `requirements.txt` auto-installs.
 5. Panel → Environment/Variables → add:
-   - `DISCORD_TOKEN`, `MONGO_URI`, `COMMAND_PREFIX=!`, `TEST_GUILD_ID` (optional for instant slash), `PUBLIC_WEB_URL=https://YOUR-SITE.netlify.app` (used by `!manage`).
+   - `DISCORD_TOKEN`, `MONGO_URI`, `COMMAND_PREFIX=!`, `TEST_GUILD_ID` (optional for instant slash), `PUBLIC_WEB_URL=https://YOUR-SITE.netlify.app` (used by `!manage`), `GROQ_TOKEN` (powers the smart `!ftcask` router + Wilso answers).
+   - The `bot/data/ftc/collections/` markdown files are deployed with the bot — edit them to grow the local knowledge base.
 6. Start. Logs should show `Logged in as ...` + `slash synced`.
 7. Free plan: click Renew every ~4 days or bot pauses.
 8. Test in server: `!ping`, `!bal`, `/balance`, `!inv`, `/inventory`, `!addcmd hello Hi`, `!ftchelp`.

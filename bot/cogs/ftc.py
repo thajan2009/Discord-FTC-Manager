@@ -14,19 +14,16 @@ citations move out of the text into one compact "Manual refs" footer line.
 """
 
 import re
-import uuid
 
-import aiohttp
 import discord
 from discord.ext import commands
 
+from data.ftc.pipeline import answer as pipeline_answer
 from utils.branding import brand
 
-API_URL = "https://ftc-chatbot-api.pdx-prod.ftclive.org/api/v1/chat/"
-TIMEOUT = 60
+ANSWER_EMOJI = "\U0001F9E0"  # brain
 MAX_EMBED = 3900
 MAX_PAGES = 3  # stop any runaway answer from spamming the channel
-ANSWER_EMOJI = "\U0001F9E0"  # brain
 
 REF_RE = re.compile(r"\[([^\]]*)\]\((manual|https?)://([^)\s]+)\)")
 HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s*(.+?)\s*#*$")
@@ -76,7 +73,11 @@ def render(text: str) -> str:
     if refs:
         shown = refs[:25]
         more = f" +{len(refs) - len(shown)} more" if len(refs) > len(shown) else ""
-        text += f"\n\n**Manual refs:** {' · '.join(shown)}{more}"
+        text += (
+            f"\n\n**Manual refs:** {' · '.join(shown)}{more}\n"
+            "**Source:** [FTC Game Manual](https://ftc-resources.firstinspires.org/ftc/game) · "
+            "[FTC Docs](https://ftc-docs.firstinspires.org/)"
+        )
     return text or "No answer came back."
 
 
@@ -141,38 +142,19 @@ class FTCAsk(commands.Cog):
     @commands.command(name="ftcask")
     @commands.cooldown(30, 60.0, commands.BucketType.guild)
     async def ftcask(self, ctx: commands.Context, *, prompt: str):
-        """!ftcask <question> — ask the FTC AI chatbot a rules question."""
+        """!ftcask <question> — ask the FTC/Wilso AI a question.
+        The router decides: official manual, Wilso engineering, or fused."""
         prompt = prompt.strip()
         if len(prompt) > 500:
             prompt = prompt[:500]
         async with ctx.typing():
-            payload = {
-                "user_message": prompt,
-                "conversation_history": [],
-                "session_id": str(uuid.uuid4()),
-                "user_message_uuid": None,
-            }
             try:
-                timeout = aiohttp.ClientTimeout(total=TIMEOUT)
-                async with aiohttp.ClientSession(timeout=timeout) as sess:
-                    async with sess.post(
-                        API_URL,
-                        json=payload,
-                        headers={"Content-Type": "application/json"},
-                    ) as resp:
-                        if resp.status != 200:
-                            body = (await resp.text())[:200]
-                            raise RuntimeError(f"HTTP {resp.status} {body}")
-                        data = await resp.json(content_type=None)
-            except aiohttp.ClientError:
-                return await self._oops(ctx, "The FTC AI site could not be reached. Try again in a moment.")
-            except TimeoutError:
-                return await self._oops(ctx, "The FTC AI site took too long to answer. Try again.")
+                result = await pipeline_answer(prompt)
             except Exception:
-                return await self._oops(ctx, "Something went wrong asking the FTC AI site.")
+                return await self._oops(ctx, "The FTC AI and Custom FTC AI backends are both unavailable. Try again in a moment.")
 
-        answer = trim(render(str(data.get("bot_response") or "")))
-        await self._send_answer(ctx, answer, bool(data.get("question_answered", True)))
+        answer = trim(render(result["text"]))
+        await self._send_answer(ctx, answer, result.get("route", "both"))
 
     async def _oops(self, ctx: commands.Context, msg: str):
         e = brand(
@@ -183,22 +165,25 @@ class FTCAsk(commands.Cog):
             ),
             "FTCManager",
         )
-        return await ctx.send(embed=e)
+        return await ctx.reply(embed=e, mention_author=False)
 
-    async def _send_answer(self, ctx: commands.Context, answer: str, answered: bool):
+    async def _send_answer(self, ctx: commands.Context, answer: str, route: str):
+        label = {"manual": "FTC AI (official manual)", "wilso": "Custom FTC AI", "both": "Custom FTC AI (FTC AI + Wilso)", "cached": "Custom FTC AI"}.get(route, "Custom FTC AI")
         parts = pages(answer, MAX_EMBED)
+        embeds = []
         for i, part in enumerate(parts):
-            title = f"{ANSWER_EMOJI} FTC AI" if i == 0 else f"{ANSWER_EMOJI} FTC AI (continued)"
+            title = f"{ANSWER_EMOJI} {label}" if i == 0 else f"{ANSWER_EMOJI} {label} (continued)"
             e = brand(
                 discord.Embed(
                     title=title,
                     description=part,
-                    colour=discord.Colour.blurple() if answered else discord.Colour.greyple(),
+                    colour=discord.Colour.blurple(),
                 ),
                 "FTCManager",
             )
-            e.set_footer(text="Official FTC AI • answers follow the FTC Competition Manual • ask again with !ftcask <question>")
-            await ctx.send(embed=e)
+            e.set_footer(text=f"Source: {label} • via !ftcask • answers follow the FTC Game Manual")
+            embeds.append(e)
+        await ctx.reply(embeds=embeds, mention_author=False)
 
 
 async def setup(bot: commands.Bot):
