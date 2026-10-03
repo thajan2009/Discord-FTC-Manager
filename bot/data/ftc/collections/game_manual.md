@@ -25,6 +25,11 @@
 - tags: game, biobuzz, pollen, nectar, garden, flowers, cells, hive, scoring
 - summary: Sections on the game (BIOBUZZ), scoring via POLLEN/NECTAR/GARDEN/FLOWERS/CELLS/HIVE TIP, inspection, and penalties.
 
+## Game Manual — violations and penalties
+- url: https://ftc-resources.firstinspires.org/ftc/game
+- tags: violation, penalties, foul, card, disqualification, disabled, robot rules, inspection failure
+- summary: How violations are classed (FOUL, MAJOR FOUL, MINOR FOUL, yellow/red card, disabled, disqualified) and what results follow.
+
 ## Game Manual — robot construction rules
 - url: https://ftc-resources.firstinspires.org/ftc/game
 - tags: robot construction rules, r rules, sizing, weight, starting configuration, expansion, legal

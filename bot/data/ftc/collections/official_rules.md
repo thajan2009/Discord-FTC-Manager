@@ -5,6 +5,11 @@
 - tags: game manual, rules, legality, robot constraints, scoring, inspection, penalties
 - summary: The current official FTC Game Manual PDF. Authority for all official rules.
 
+## Violations, FOULs and cards
+- url: https://ftc-resources.firstinspires.org/ftc/game
+- tags: violation, penalties, foul, card, disqualification, disabled, inspection
+- summary: Rule violations are tracked as FOULs/carded; inspections and penalties flow from the current Game Manual and Team Updates.
+
 ## Official FTC Q&A
 - url: https://ftc-qa.firstinspires.org/
 - tags: q&a, questions and answers, official interpretation, ruling

@@ -11,7 +11,7 @@ The old FTC AI manual chatbot is archived in bot/data/ftc/ftc_ai_archived.py.
 import re
 import time
 
-from data.ftc.knowledge import search
+from data.ftc.knowledge import category, search
 from data.wilso_prompt import SYSTEM_PROMPT, build_user_message
 from utils.groq import ROUTER_MODEL, chat
 
@@ -84,7 +84,7 @@ ANSWER_SMALL = "openai/gpt-oss-20b"  # fast, cheap default
 
 
 async def _rules_answer(question: str) -> str:
-    hits = search(question, k=3)
+    hits = search(question, k=4)
     extra = ""
     if hits:
         lines = "\n".join(f"- {h['name']}: {h['summary']} ({h['url'] or h['source']})" for h in hits)
@@ -108,7 +108,7 @@ async def _rules_answer(question: str) -> str:
 
 
 async def _wilso_answer(question: str) -> str:
-    hits = search(question, k=3)
+    hits = search(question, k=4)
     extra = ""
     if hits:
         lines = "\n".join(f"- {h['name']}: {h['summary']} ({h['url'] or h['source']})" for h in hits)
@@ -143,7 +143,7 @@ _FUSED_SYS = (
 
 
 async def _fused(question: str) -> str:
-    hits = search(question, k=3)
+    hits = search(question, k=4)
     extra = ""
     if hits:
         res = "\n".join(f"- {h['name']}: {h['summary']} ({h['url'] or h['source']})" for h in hits)
@@ -171,7 +171,13 @@ async def answer(question: str) -> dict:
     if hit:
         return {"route": "cached", "text": hit}
 
-    route = _route_heuristic(q) or await _route_model(q)
+    manual_q = category(q) == "manual"
+    if manual_q:
+        route = "manual"  # rules/game-manual questions always use the rules answer
+    else:
+        route = _route_heuristic(q) or await _route_model(q)
+        if route == "manual":
+            route = "wilso"  # technical question misclassified as rules -> prefer gm0 path
     try:
         if route == "manual":
             text = await _rules_answer(q)
