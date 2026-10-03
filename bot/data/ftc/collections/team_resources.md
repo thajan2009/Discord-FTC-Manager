@@ -30,17 +30,22 @@
 - tags: queueing, events, schedule
 - summary: Queueing / event schedule platform (useful during events).
 
-## YouTube channels
+## FTC Resources (current game manual)
+- url: https://ftc-resources.firstinspires.org/ftc/game
+- tags: game, game manual, current season, scoring, rules
+- summary: Main resources for the current FTC game, e.g. the game manual.
+
+## First Tech Challenge — YouTube (official)
 - url: https://www.youtube.com/@FIRSTTechChallenge
-- tags: video, game reveal, events
-- summary: Official FIRST Tech Challenge channel.
+- tags: video, game reveal, events, official
+- summary: Main game reveal and official FIRST Tech Challenge channel.
 
-## FUNRoboticsNetwork
+## FUNRoboticsNetwork (YouTube)
 - url: https://www.youtube.com/@FUNRoboticsNetwork
-- tags: video, behind the bots, teams
-- summary: Behind The Bots and team features (mix of VRC/FRC, FTC too).
+- tags: video, behind the bots, teams, vrc, frc
+- summary: Behind The Bots and team features (much VRC/FRC, some FTC).
 
-## BroganMPratt
+## BroganMPratt (YouTube)
 - url: https://www.youtube.com/@BroganMPratt
-- tags: video, ftc, analysis
+- tags: video, ftc, analysis, weekly
 - summary: Weekly FTC videos on interesting topics.

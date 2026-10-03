@@ -1,9 +1,9 @@
-# Official rules — authoritative game rules and procedure.
+# Official rules — the authoritative source for game rules.
 
 ## Current FTC Game Manual
 - url: https://ftc-resources.firstinspires.org/ftc/game
-- tags: game manual, rules, legality, robot constraints, scoring, inspection, penalties, violations
-- summary: The current official FTC Game Manual. Authority for all official rules.
+- tags: game manual, rules, legality, robot constraints, scoring, inspection, penalties
+- summary: The current official FTC Game Manual PDF. Authority for all official rules.
 
 ## Official FTC Q&A
 - url: https://ftc-qa.firstinspires.org/
@@ -12,10 +12,15 @@
 
 ## FTC Team Updates
 - url: https://ftc-resources.firstinspires.org/ftc/updates
-- tags: team updates, rule changes, season updates, events
+- tags: team updates, rule changes, season updates, events, game
 - summary: Official team updates that amend rules during the season.
 
-## Current game resources
+## FTC Resources — current game
 - url: https://ftc-resources.firstinspires.org/ftc/game
-- tags: game, game manual, current season, scoring
+- tags: game, game manual, current season, scoring, rules
 - summary: Main resources for the current FTC game, including the Game Manual PDF.
+
+## FTC Scoring
+- url: https://ftc-scoring.firstinspires.org/
+- tags: scoring, matches, tournament, events, rules
+- summary: Official scoring platform for FTC matches and tournaments.
