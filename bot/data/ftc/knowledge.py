@@ -9,8 +9,11 @@ Each entry block looks like:
 retrieval: simple token overlap scoring — fast, no dependencies.
 """
 
+import html as _html
 import re
 from pathlib import Path
+
+import aiohttp
 
 _ROOT = Path(__file__).resolve().parent / "collections"
 
@@ -87,7 +90,48 @@ def _query_boost(entry: dict, category: str) -> int:
     return 0
 
 
-_STOP = set("a an the i me my we you he she it do does did is are was were can could should will how what when where why be been by for to of in on at and or but if as with from that this as get gets use using us used which who whom from into about would".split())
+_cache_txt: dict[str, str] = {}
+
+
+def _html_to_text(raw: str) -> str:
+    # Prefer the main article body when present (avoids chrome/nav text up front).
+    for tag in ("article", "main"):
+        m = re.search(r"<" + tag + r"[\s\S]*?</" + tag + ">", raw, flags=re.I)
+        if m:
+            raw = m.group(0)
+            break
+    s = re.sub(r"<(script|style|nav|header|footer|aside)[\s\S]*?</\1>", " ", raw, flags=re.I)
+    s = re.sub(r"</(p|li|h[1-6]|div|tr|ul|ol)>", "\n", s, flags=re.I)
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = _html.unescape(s)
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r"\n\s*\n+", "\n", s)
+    return s.strip()
+
+
+async def page_text(url: str, max_len: int = 2200) -> str:
+    """Fetch a gm0/docs page and return its cleaned text (cached). '' on failure."""
+    if not url.startswith("http"):
+        return ""
+    if url in _cache_txt:
+        return _cache_txt[url]
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as s:
+            async with s.get(url, headers={"User-Agent": "FTCManagerBot"}) as r:
+                if r.status != 200:
+                    _cache_txt[url] = ""
+                    return ""
+                raw = await r.text()
+        txt = _html_to_text(raw)[:max_len]
+        _cache_txt[url] = txt
+        return txt
+    except Exception:
+        _cache_txt[url] = ""
+        return ""
+
+
+_STOP = set("a an the i me my we you he she it do does did is are was were can could should will how what when where why be been by for to of in on at and or but if as with from that this as get gets use using us used which who whom from into about would types type advantage advantage disadvantage disadvantage disadvantages advantages disadvantage type types differing different specify specifies specific".split())
 
 
 def search(query: str, k: int = 4) -> list[dict]:
@@ -96,7 +140,10 @@ def search(query: str, k: int = 4) -> list[dict]:
     scored = []
     for e in _ALL:
         hay = f"{e['name']} {e['tags']} {e['summary']}".lower()
-        kw = sum(1 for t in terms if t in hay)
+        kw = 0
+        for t in terms:
+            if t in hay or (t.endswith("s") and t[:-1] in hay) or (f"{t}s" in hay):
+                kw += 1
         if not kw:
             continue  # gm0/default boost must never surface irrelevant entries
         scored.append((kw + _query_boost(e, category), e))

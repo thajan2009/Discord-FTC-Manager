@@ -11,7 +11,7 @@ The old FTC AI manual chatbot is archived in bot/data/ftc/ftc_ai_archived.py.
 import re
 import time
 
-from data.ftc.knowledge import category, search
+from data.ftc.knowledge import category, page_text, search
 from data.wilso_prompt import SYSTEM_PROMPT, build_user_message
 from utils.groq import ROUTER_MODEL, chat
 
@@ -39,6 +39,19 @@ def _sources_block(hits: list[dict]) -> str:
         return ""
     lines = "\n".join(f"- [{h['name']}]({h['url']})" for h in links[:4])
     return f"\n\n**Sources:**\n{lines}"
+
+
+async def _resources_with_excerpts(hits: list[dict]) -> str:
+    lines = "\n".join(f"- {h['name']}: {h['summary']} ({h['url'] or h['source']})" for h in hits)
+    out = f"\n\nRelevant resources:\n{lines}" if lines else ""
+    excerpts = []
+    for h in hits[:2]:
+        body = await page_text(h.get("url", ""), max_len=2600)
+        if body:
+            excerpts.append(f"### {h['name']} ({h['url']})\n{body}")
+    if excerpts:
+        out += "\n\nRelevant source excerpts (use only from here, do not fabricate):\n" + "\n\n".join(excerpts)
+    return out
 
 
 def _route_heuristic(q: str) -> str | None:
@@ -85,10 +98,7 @@ ANSWER_SMALL = "openai/gpt-oss-20b"  # fast, cheap default
 
 async def _rules_answer(question: str) -> str:
     hits = search(question, k=4)
-    extra = ""
-    if hits:
-        lines = "\n".join(f"- {h['name']}: {h['summary']} ({h['url'] or h['source']})" for h in hits)
-        extra = f"\n\nRelevant resources to cite:\n{lines}"
+    extra = await _resources_with_excerpts(hits)
     system = (
         SYSTEM_PROMPT
         + "\n\nThis is an OFFICIAL RULES question. Be authoritative and cite the current Game Manual where confident. "
@@ -109,10 +119,17 @@ async def _rules_answer(question: str) -> str:
 
 async def _wilso_answer(question: str) -> str:
     hits = search(question, k=4)
+    excerpts = []
+    for h in hits[:2]:  # ground the answer in the actual source pages
+        body = await page_text(h.get("url", ""), max_len=2600)
+        if body:
+            excerpts.append(f"### {h['name']} ({h['url']})\n{body}")
     extra = ""
     if hits:
         lines = "\n".join(f"- {h['name']}: {h['summary']} ({h['url'] or h['source']})" for h in hits)
-        extra = f"\n\nRelevant resources (mention only if helpful):\n{lines}"
+        extra = f"\n\nRelevant resources:\n{lines}"
+    if excerpts:
+        extra += "\n\nRelevant source excerpts (use only from here, do not fabricate):\n" + "\n\n".join(excerpts)
     if _CODE.search(question):  # programming/path-planning -> strongest coding model
         text = await chat(
             [{"role": "system", "content": SYSTEM_PROMPT + extra}, {"role": "user", "content": build_user_message(question)}],
@@ -144,10 +161,7 @@ _FUSED_SYS = (
 
 async def _fused(question: str) -> str:
     hits = search(question, k=4)
-    extra = ""
-    if hits:
-        res = "\n".join(f"- {h['name']}: {h['summary']} ({h['url'] or h['source']})" for h in hits)
-        extra = f"\n\nRelevant resources (link any you actually use):\n{res}"
+    extra = await _resources_with_excerpts(hits)
     text = await chat(
         [
             {"role": "system", "content": _FUSED_SYS + extra},
