@@ -1,19 +1,12 @@
-"""FTC AI — PREFIX ONLY.
+"""Custom FTC AI — PREFIX ONLY.
 
-!ftcask <prompt>  ->  asks the official FTC AI chatbot and returns the answer.
-
-Talks to the same public API the FTC AI website uses:
-    POST https://ftc-chatbot-api.pdx-prod.ftclive.org/api/v1/chat/
-No key or login needed. Single-turn only (no conversation memory) for now.
-
-The API returns GitHub-flavoured markdown: `##` headings, nested `*` bullets,
-**bold**/*italic*, and inline rule citations like [R102](manual://121).
-render() converts that into something Discord actually draws nicely:
-headings and bold survive, bullets become Discord bullets with ↳ sub-items,
-citations move out of the text into one compact "Manual refs" footer line.
+!ftcask <prompt>  ->  routes via Groq (heurstic + tiny router model) and answers
+with Custom FTC AI (rules / design+code / fused). All backends now run on Groq;
+the legacy FTC AI manual chatbot is archived in data/ftc/ftc_ai_archived.py.
 """
 
 import re
+from datetime import datetime, timezone
 
 import discord
 from discord.ext import commands
@@ -22,6 +15,8 @@ from data.ftc.pipeline import answer as pipeline_answer
 from utils.branding import brand
 
 ANSWER_EMOJI = "\U0001F9E0"  # brain
+DAILY_CAP = 60  # server-wide cap to protect the free-tier backends
+_DAILY_STATE = {"date": "", "n": 0}
 MAX_EMBED = 3900
 MAX_PAGES = 3  # stop any runaway answer from spamming the channel
 
@@ -140,13 +135,27 @@ def trim(text: str, pages_max: int = MAX_PAGES) -> str:
 
 class FTCAsk(commands.Cog):
     @commands.command(name="ftcask")
-    @commands.cooldown(30, 60.0, commands.BucketType.guild)
+    @commands.cooldown(1, 10.0, commands.BucketType.user)  # 1 use per 10s per user
     async def ftcask(self, ctx: commands.Context, *, prompt: str):
         """!ftcask <question> — ask the FTC/Wilso AI a question.
         The router decides: official manual, Wilso engineering, or fused."""
         prompt = prompt.strip()
         if len(prompt) > 500:
             prompt = prompt[:500]
+        today = datetime.now(timezone.utc).date().isoformat()
+        if _DAILY_STATE["date"] != today:
+            _DAILY_STATE.update(date=today, n=0)
+        if _DAILY_STATE["n"] >= DAILY_CAP:
+            e = brand(
+                discord.Embed(
+                    title="Daily limit reached",
+                    description=f"`!ftcask` has reached the {DAILY_CAP} answers/day limit to protect the free backends. Try again tomorrow (UTC).",
+                    colour=discord.Colour.orange(),
+                ),
+                "FTCManager",
+            )
+            return await ctx.reply(embed=e, mention_author=False)
+        _DAILY_STATE["n"] += 1
         async with ctx.typing():
             try:
                 result = await pipeline_answer(prompt)
@@ -168,7 +177,7 @@ class FTCAsk(commands.Cog):
         return await ctx.reply(embed=e, mention_author=False)
 
     async def _send_answer(self, ctx: commands.Context, answer: str, route: str):
-        label = {"manual": "FTC AI (official manual)", "wilso": "Custom FTC AI", "both": "Custom FTC AI (FTC AI + Wilso)", "cached": "Custom FTC AI"}.get(route, "Custom FTC AI")
+        label = {"manual": "Custom FTC AI (rules)", "wilso": "Custom FTC AI", "both": "Custom FTC AI (rules + design)", "cached": "Custom FTC AI"}.get(route, "Custom FTC AI")
         parts = pages(answer, MAX_EMBED)
         embeds = []
         for i, part in enumerate(parts):

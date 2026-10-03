@@ -66,7 +66,7 @@ class General(commands.Cog):
         )
         embed.add_field(
             name="FTC AI (prefix only)",
-            value="`!ftcask <question>` — routes to the official FTC manual bot or Custom FTC AI answers, e.g. `!ftcask can I use zip ties`",
+            value="`!ftcask <question>` — Custom FTC AI (Groq): rules, design, hardware or code. e.g. `!ftcask can I use zip ties`",
             inline=False,
         )
         embed.add_field(
