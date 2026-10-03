@@ -65,6 +65,11 @@ class General(commands.Cog):
             inline=False,
         )
         embed.add_field(
+            name="FTC AI (prefix only)",
+            value="`!ftcask <question>` — ask the official FTC AI chatbot, e.g. `!ftcask can I use zip ties`",
+            inline=False,
+        )
+        embed.add_field(
             name="FTC help directory (prefix only)",
             value="`!ftchelp [page]` — browse answers like `!axon`.\nAdmins: `!ftctoggle <command>` lists a server command there too.",
             inline=False,

@@ -38,6 +38,7 @@ class FTCManager(commands.Bot):
         for ext in (
             "cogs.general",
             "cogs.commands",
+            "cogs.ftc",
             "cogs.finance",
             "cogs.inventory",
             "cogs.outreach",
