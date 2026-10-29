@@ -25,13 +25,14 @@ const cards: any[] = [];
 for (const g of guilds) {
   try {
     const doc = await getGuild(String(g.id));
-    let debt = 0, src = 0;
+    let debt = 0, src = 0, credit = 0;
     for (const b of Object.values<any>(doc.finance?.teams ?? {})) {
       for (const d of (b.debts ?? [])) debt += Number(d.amount_p ?? 0);
       for (const s of (b.sources ?? [])) src += Number(s.amount_p ?? 0);
+      for (const c of (b.credits ?? [])) credit += Number(c.amount_p ?? 0);
     }
     const teamCount = (doc.teams ?? []).length;
-    cards.push({ g, stats: `${gbp(src - debt)} net · ${teamCount}/3 teams` });
+    cards.push({ g, stats: `${gbp(src - debt)} net${credit ? ` (${gbp(credit)} credit)` : ''} · ${teamCount}/3 teams` });
   } catch {
     cards.push({ g, stats: null });
   }

@@ -3,8 +3,9 @@
 - !bal / !balance / !finance [team]  ==  /balance [team]
 - No arg  -> server combined (sum of all teams)
 - With arg -> single team resolved by name/alias (web UI defines up to 3 teams)
-- Embed: initial £0.00, Debts list + total, Sources/Sponsors list + total, Net
-- Buttons: +Debt / +Source / Remove open Modals (names typed exactly, no IDs)
+- Embed: initial £0.00, Debts list + total, Sources/Sponsors list + total,
+  Store credits (shown in brackets, never subtracted from net), Net
+- Buttons: +Debt / +Source / +Store Credit / Remove open Modals (names typed exactly, no IDs)
 - Permission from web toggle settings.finance_mode: everyone|admins
 """
 
@@ -26,12 +27,17 @@ def guild_currency(doc: dict) -> str:
 
 # ---------- helpers ----------
 
+KIND_LABEL = {"debt": "Debt", "source": "Source", "credit": "Store Credit"}
+KIND_WORD = {"debt": "debt", "source": "source", "credit": "store credit"}
+
+
 def team_bucket(doc: dict, team_id: str | None) -> dict:
     teams = doc.setdefault("finance", {}).setdefault("teams", {})
     key = team_id or "_server"
-    bucket = teams.setdefault(key, {"debts": [], "sources": []})
+    bucket = teams.setdefault(key, {"debts": [], "sources": [], "credits": []})
     bucket.setdefault("debts", [])
     bucket.setdefault("sources", [])
+    bucket.setdefault("credits", [])
     return bucket
 
 
@@ -44,21 +50,24 @@ def live_team_keys(doc: dict) -> set:
 def combined_bucket(doc: dict) -> dict:
     valid = live_team_keys(doc)
     teams = doc.get("finance", {}).get("teams", {})
-    debts, sources = [], []
+    debts, sources, credits = [], [], []
     for key, bucket in teams.items():
         if key not in valid:
             continue
         debts.extend(bucket.get("debts", []))
         sources.extend(bucket.get("sources", []))
-    return {"debts": debts, "sources": sources}
+        credits.extend(bucket.get("credits", []))
+    return {"debts": debts, "sources": sources, "credits": credits}
 
 
 def finance_embed(title: str, bucket: dict, symbol: str = "£") -> discord.Embed:
     debts = bucket.get("debts", [])
     sources = bucket.get("sources", [])
+    credits = bucket.get("credits", [])
     debt_total = sum(int(d.get("amount_p", 0)) for d in debts)
     src_total = sum(int(s.get("amount_p", 0)) for s in sources)
-    net = src_total - debt_total
+    credit_total = sum(int(c.get("amount_p", 0)) for c in credits)
+    net = src_total - debt_total  # store credit is a bonus, never counted in net
     e = discord.Embed(title=title, colour=discord.Colour.gold())
     e.add_field(name="Starting balance", value=format_money(0, symbol), inline=False)
     if debts:
@@ -75,7 +84,17 @@ def finance_embed(title: str, bucket: dict, symbol: str = "£") -> discord.Embed
         e.add_field(name=f"Sources / Sponsors — {format_money(src_total, symbol)}", value="\n".join(lines), inline=False)
     else:
         e.add_field(name="Sources / Sponsors", value="None yet — press + Source.", inline=False)
-    e.add_field(name="Net cashflow", value=f"**{format_money(net, symbol)}**", inline=False)
+    if credits:
+        lines = [f"{c['name']} — {format_money(c['amount_p'], symbol)}" for c in credits[:25]]
+        if len(credits) > 25:
+            lines.append(f"+{len(credits) - 25} more — check a single team.")
+        e.add_field(name=f"Store credits — {format_money(credit_total, symbol)}", value="\n".join(lines), inline=False)
+    else:
+        e.add_field(name="Store credits", value="None yet — press + Store Credit.", inline=False)
+    net_line = f"**{format_money(net, symbol)}**"
+    if credit_total:
+        net_line += f" *(+{format_money(credit_total, symbol)} store credit)*"
+    e.add_field(name="Net cashflow", value=net_line, inline=False)
     e.set_footer(text="Type names exactly to remove (!findel <exact name>). Use buttons to add.")
     brand(e, "FTCManager Finance")
     return e
@@ -103,7 +122,7 @@ class AddEntryModal(discord.ui.Modal):
         scope_id: str | None = None, scope_label: str = "server",
         picker_msg: discord.Message | None = None,
     ):
-        super().__init__(title=f"Add {'Debt' if kind == 'debt' else 'Source'} — {team_label}")
+        super().__init__(title=f"Add {KIND_LABEL.get(kind, 'Source')} — {team_label}"[:45])
         self.kind = kind
         self.team_id = team_id
         self.orig_msg = orig_msg
@@ -130,7 +149,7 @@ class AddEntryModal(discord.ui.Modal):
                 "Easy — a save just went through. Wait a second and try again.", ephemeral=True
             )
         bucket = team_bucket(doc, self.team_id)
-        target = bucket["debts"] if self.kind == "debt" else bucket["sources"]
+        target = bucket[f"{self.kind}s"]
         target.append({
             "name": self.name_input.value.strip(),
             "amount_p": pence,
@@ -145,7 +164,7 @@ class AddEntryModal(discord.ui.Modal):
             except Exception:
                 pass
         await interaction.response.send_message(
-            f"Added {'debt' if self.kind == 'debt' else 'source'} `{self.name_input.value.strip()}` — {format_money(pence, symbol)}.",
+            f"Added {KIND_WORD.get(self.kind, 'entry')} `{self.name_input.value.strip()}` — {format_money(pence, symbol)}.",
             ephemeral=True,
         )
 
@@ -229,7 +248,7 @@ async def pick_team_then_modal(
         )
     view = TeamPickView(doc.get("teams", []), current_id, kind, orig_msg, scope_id, scope_label)
     await interaction.response.send_message(
-        f"Add {'debt' if kind == 'debt' else 'source'} to which team?",
+        f"Add {KIND_WORD.get(kind, 'entry')} to which team?",
         view=view,
         ephemeral=True,
     )
@@ -278,6 +297,13 @@ class FinanceView(discord.ui.View):
             interaction.message, self.team_id, self.team_label,
         )
 
+    @discord.ui.button(label="+ Store Credit", style=discord.ButtonStyle.blurple)
+    async def add_credit(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await pick_team_then_modal(
+            interaction, self.team_id, "credit",
+            interaction.message, self.team_id, self.team_label,
+        )
+
     @discord.ui.button(label="Remove", style=discord.ButtonStyle.grey)
     async def remove_entry(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(
@@ -313,7 +339,7 @@ class RemoveEntryModal(discord.ui.Modal):
             buckets = [team_bucket(doc, self.team_id)]
         removed = 0
         for bucket in buckets:
-            for lst in ("debts", "sources"):
+            for lst in ("debts", "sources", "credits"):
                 kept = [e for e in bucket.get(lst, []) if e.get("name", "").lower() != name.lower()]
                 removed += len(bucket.get(lst, [])) - len(kept)
                 bucket[lst] = kept
@@ -387,7 +413,7 @@ class Finance(commands.Cog):
             return await ctx.send("Only admins can manage finance.")
         removed = 0
         for bucket in doc.get("finance", {}).get("teams", {}).values():
-            for lst in ("debts", "sources"):
+            for lst in ("debts", "sources", "credits"):
                 kept = [e for e in bucket.get(lst, []) if e.get("name", "").lower() != name.strip().lower()]
                 removed += len(bucket.get(lst, [])) - len(kept)
                 bucket[lst] = kept

@@ -17,7 +17,7 @@ Design (every data-loss path closed):
 Document shapes:
   {_type: "guild", guild_id: str, teams: [{id, name, aliases[]}],
    settings: {finance_mode, inventory_mode},  # everyone|admins
-   finance: {teams: {<team_id|_server>: {debts:[], sources:[]}}},
+   finance: {teams: {<team_id|_server>: {debts:[], sources:[], credits:[]}}},
    inventory: {teams: {<team_id|_server>: {items: [{name,qty}]}}},
    commands: [{trigger, response}]}
   {_type: "global_commands", entries: {trigger: response}}

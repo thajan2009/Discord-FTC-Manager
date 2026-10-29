@@ -21,7 +21,7 @@ export const POST: APIRoute = async ({ request, params }) => {
   const doc: any = await c.findOne({ _type: 'guild', guild_id: id });
   const bucket = doc?.finance?.teams?.[bucketKey];
   if (bucket) {
-    for (const lst of ['debts', 'sources']) {
+    for (const lst of ['debts', 'sources', 'credits']) {
       bucket[lst] = (bucket[lst] ?? []).filter((e: any) => String(e.name ?? '').toLowerCase() !== name);
     }
     await c.updateOne(

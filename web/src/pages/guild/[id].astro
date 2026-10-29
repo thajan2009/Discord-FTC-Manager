@@ -47,13 +47,14 @@ function gbp(pence: number, sym: string = currency): string {
   return `${sign}${sym}${whole.toLocaleString('en-GB')}.${rest}`;
 }
 
-let debtTotal = 0, srcTotal = 0, itemKinds = 0, itemQty = 0;
+let debtTotal = 0, srcTotal = 0, creditTotal = 0, itemKinds = 0, itemQty = 0;
 // Only live teams + server bucket: entries from long-deleted teams stay hidden.
 const validBuckets = new Set(['_server', ...teams.map((t: any) => t.id)]);
 for (const [key, bucket] of Object.entries<any>(doc.finance?.teams ?? {})) {
   if (!validBuckets.has(key)) continue;
   for (const d of (bucket.debts ?? [])) debtTotal += Number(d.amount_p ?? 0);
   for (const s of (bucket.sources ?? [])) srcTotal += Number(s.amount_p ?? 0);
+  for (const c of (bucket.credits ?? [])) creditTotal += Number(c.amount_p ?? 0);
 }
 for (const [key, bucket] of Object.entries<any>(doc.inventory?.teams ?? {})) {
   if (!validBuckets.has(key)) continue;
@@ -68,10 +69,12 @@ function bucketLabel(key: string): string {
 
 const finDebts: any[] = [];
 const finSources: any[] = [];
+const finCredits: any[] = [];
 for (const [key, bucket] of Object.entries<any>(doc.finance?.teams ?? {})) {
   if (!validBuckets.has(key)) continue;
   for (const d of (bucket.debts ?? [])) finDebts.push({ bucket: key, name: d.name, amount: Number(d.amount_p ?? 0), by: d.by ?? null });
   for (const s of (bucket.sources ?? [])) finSources.push({ bucket: key, name: s.name, amount: Number(s.amount_p ?? 0), by: s.by ?? null });
+  for (const c of (bucket.credits ?? [])) finCredits.push({ bucket: key, name: c.name, amount: Number(c.amount_p ?? 0), by: c.by ?? null });
 }
 const invItems: any[] = [];
 for (const [key, bucket] of Object.entries<any>(doc.inventory?.teams ?? {})) {
@@ -127,7 +130,7 @@ if (invSource === 'sheet') {
     <h2>Overview</h2>
     <p class="desc">Combined across all teams. Details live in Discord via <code class="cmd">!bal</code> and <code class="cmd">!inv</code>.</p>
     <div class="stats">
-      <StatCard label="Net cashflow" value={gbp(net)} sub={`in ${gbp(srcTotal)} / out ${gbp(debtTotal)}`} />
+      <StatCard label="Net cashflow" value={gbp(net)} sub={`in ${gbp(srcTotal)} / out ${gbp(debtTotal)}${creditTotal ? ` (${gbp(creditTotal)} store credit)` : ''}`} />
       <StatCard label="Inventory" value={String(itemQty)} sub={`${itemKinds} different items`} />
       <StatCard label="Teams" value={`${teams.length} / 3`} sub={(cmds.length === 1 ? '1 custom command' : `${cmds.length} custom commands`)} />
     </div>
@@ -170,8 +173,8 @@ if (invSource === 'sheet') {
 
   <section class="section reveal">
     <h2>Finance details</h2>
-    <p class="desc">Every debt and source across teams. Add new ones from Discord with the + Debt / + Source buttons.</p>
-    {(finDebts.length === 0 && finSources.length === 0) ? (
+    <p class="desc">Every debt, source and store credit across teams. Add new ones from Discord with the + Debt / + Source / + Store Credit buttons. Store credits are shown in brackets and never subtracted from net cashflow.</p>
+    {(finDebts.length === 0 && finSources.length === 0 && finCredits.length === 0) ? (
       <p class="empty">Nothing tracked yet. Type <code class="cmd">!bal</code> in Discord to get started.</p>
     ) : null}
     {finDebts.length > 0 ? (
@@ -227,6 +230,36 @@ if (invSource === 'sheet') {
               <form method="POST" action={`/api/guilds/${id}/finance/delete`} onsubmit="return confirm('Delete this entry?')">
                 <input type="hidden" name="bucket" value={s.bucket} />
                 <input type="hidden" name="name" value={s.name} />
+                <button class="btn-danger" type="submit">Delete</button>
+              </form>
+            </div>
+          ))}
+        </div>
+      </>
+    ) : null}
+    {finCredits.length > 0 ? (
+      <>
+        <h3>Store credits — {gbp(creditTotal)} <span style="font-weight:400;opacity:.7">(not counted in net)</span></h3>
+        <div class="row-list">
+          {finCredits.map((c: any) => (
+            <div class="row-item">
+              <div class="meta">
+                <div class="title">{c.name} — {gbp(c.amount)}</div>
+                <div class="detail">{bucketLabel(c.bucket)}{c.by ? ` · added by ${c.by}` : ''}</div>
+                <details class="edit">
+                  <summary>Edit name / amount</summary>
+                  <form method="POST" action={`/api/guilds/${id}/finance/edit`}>
+                    <input type="hidden" name="bucket" value={c.bucket} />
+                    <input type="hidden" name="oldname" value={c.name} />
+                    <input name="name" value={c.name} required maxlength="80" aria-label="Name" />
+                    <input name="amount" value={pounds(c.amount)} required inputmode="decimal" aria-label={`Amount (${currency})`} />
+                    <button class="btn btn-small" type="submit">Save</button>
+                  </form>
+                </details>
+              </div>
+              <form method="POST" action={`/api/guilds/${id}/finance/delete`} onsubmit="return confirm('Delete this entry?')">
+                <input type="hidden" name="bucket" value={c.bucket} />
+                <input type="hidden" name="name" value={c.name} />
                 <button class="btn-danger" type="submit">Delete</button>
               </form>
             </div>

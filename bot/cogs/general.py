@@ -46,7 +46,7 @@ class General(commands.Cog):
         embed = discord.Embed(title="FTCManager Help", colour=discord.Colour.blurple())
         embed.add_field(
             name="Finance (prefix + slash)",
-            value="`!bal [team]` / `/balance [team]`\n`!balance`, `!finance` are aliases.",
+            value="`!bal [team]` / `/balance [team]`\n`!balance`, `!finance` are aliases.\nButtons: + Debt, + Source / Sponsor, + Store Credit.",
             inline=False,
         )
         embed.add_field(

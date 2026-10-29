@@ -30,7 +30,7 @@ export const POST: APIRoute = async ({ request, params }) => {
   const bucket = doc?.finance?.teams?.[bucketKey];
   if (!bucket) return fail('missing');
   let touched = false;
-  for (const lst of ['debts', 'sources']) {
+  for (const lst of ['debts', 'sources', 'credits']) {
     for (const e of (bucket[lst] ?? [])) {
       if (String(e.name ?? '').toLowerCase() === oldname) {
         e.name = name;
