@@ -522,7 +522,7 @@ class Inventory(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="inventory", aliases=["inv"], description="Show inventory. Optional team.")
+    @commands.hybrid_command(name="inventory", description="Show inventory. Optional team.")
     @commands.cooldown(30, 60.0, commands.BucketType.guild)
     @app_commands.describe(team="Team name or alias (empty = combined)")
     @app_commands.autocomplete(team=team_autocomplete)
