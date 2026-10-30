@@ -394,7 +394,7 @@ class Finance(commands.Cog):
             else:
                 await ctx_or_interaction.response.send_message(embed=embed, view=view)
 
-    @commands.hybrid_command(name="balance", aliases=["bal", "finance"], description="Show balance. Optional team.")
+    @commands.hybrid_command(name="balance", aliases=["finance"], description="Show balance. Optional team.")
     @commands.cooldown(30, 60.0, commands.BucketType.guild)
     @app_commands.describe(team="Team name or alias (empty = whole server)")
     @app_commands.autocomplete(team=team_autocomplete)
